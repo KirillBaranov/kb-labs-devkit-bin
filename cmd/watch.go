@@ -50,9 +50,6 @@ In --json mode, emits JSONL events (one JSON object per line) for agent consumpt
 					continue
 				}
 
-				preset, err := cfg.Workspace.Categories[pkg.Category].PresetConfig(cfg)
-				_ = err
-
 				// Run checks on just this package.
 				pkgResults := checks.RunAll(ws, cfg, registry, nil)
 				result, ok := pkgResults[pkg.Name]
