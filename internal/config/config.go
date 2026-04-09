@@ -7,8 +7,19 @@ type DevkitConfig struct {
 	Workspace WorkspaceConfig            `yaml:"workspace"`
 	Sync      SyncConfig                 `yaml:"sync"`
 	Build     BuildConfig                `yaml:"build"`
+	Tasks     map[string]TaskConfig      `yaml:"tasks"`
 	Presets   map[string]Preset          `yaml:"presets"`
 	Custom    []CustomCheck              `yaml:"custom_checks"`
+}
+
+// TaskConfig defines a named task in devkit.yaml.
+// Tasks are the unit of cached execution: build, lint, test, deploy, etc.
+type TaskConfig struct {
+	Command string   `yaml:"command"`
+	Inputs  []string `yaml:"inputs"`  // glob patterns relative to package dir
+	Outputs []string `yaml:"outputs"` // glob patterns; empty = no output files (cache exit code)
+	Deps    []string `yaml:"deps"`    // "^build" = deps' task first; "build" = self's task first
+	Cache   *bool    `yaml:"cache"`   // nil = true; false = always run (e.g. deploy)
 }
 
 // WorkspaceConfig describes package categories and the package manager.
