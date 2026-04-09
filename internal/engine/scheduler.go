@@ -19,6 +19,7 @@ type RunOptions struct {
 	Tasks       []string // task names to run (in order)
 	Packages    []workspace.Package
 	NoCache     bool
+	LiveOutput  bool // stream stdout/stderr while running (disables parallel output)
 	Concurrency int
 	WSRoot      string
 	CacheRoot   string // path to .kb/devkit/
@@ -86,7 +87,7 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 		return RunResult{}, fmt.Errorf("cache init: %w", err)
 	}
 	manifests := cache.NewManifestStore(cacheRoot)
-	executor := NewExecutor(objects, manifests, opts.WSRoot)
+	executor := NewExecutor(objects, manifests, opts.WSRoot, opts.LiveOutput)
 
 	// Build DAG of (pkg, task) nodes.
 	nodes, err := buildDAG(pkgs, opts.Tasks, taskDefs, ws)
@@ -94,9 +95,11 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 		return RunResult{}, err
 	}
 
-	// Concurrency.
+	// Concurrency. Live output forces 1 to avoid interleaved lines.
 	concurrency := opts.Concurrency
-	if concurrency <= 0 {
+	if opts.LiveOutput {
+		concurrency = 1
+	} else if concurrency <= 0 {
 		concurrency = runtime.NumCPU()
 		if concurrency > 1 {
 			concurrency--
@@ -301,37 +304,200 @@ func runLayer(
 	return results
 }
 
-// ─── Affected packages via git ────────────────────────────────────────────────
+// ─── Affected packages ────────────────────────────────────────────────────────
 
-// AffectedPackages returns packages with files changed since last commit.
-// V1: directly changed packages only (no downstream BFS).
-func AffectedPackages(ws *workspace.Workspace) ([]workspace.Package, error) {
-	// git diff --name-only HEAD (staged + unstaged changes).
-	out, err := exec.Command("git", "diff", "--name-only", "HEAD").Output()
+// AffectedPackages returns all packages affected by current changes:
+// directly changed packages + all their downstream dependents (BFS).
+//
+// Strategy is controlled by cfg.Affected.Strategy (default: "git").
+//   git        — single `git diff --name-only HEAD` from ws root
+//   submodules — walks .gitmodules, runs git diff inside each submodule
+//   command    — runs cfg.Affected.Command, reads file paths from stdout
+func AffectedPackages(ws *workspace.Workspace, cfg *config.DevkitConfig) ([]workspace.Package, error) {
+	strategy := cfg.Affected.Strategy
+	if strategy == "" {
+		strategy = "git"
+	}
+
+	changedFiles, err := collectChangedFiles(ws.Root, strategy, cfg.Affected.Command)
 	if err != nil {
-		// Fallback: staged only (unborn branch / initial commit).
-		out, err = exec.Command("git", "diff", "--name-only", "--cached").Output()
-		if err != nil {
-			return nil, fmt.Errorf("git diff: %w", err)
+		return nil, fmt.Errorf("affected: collect changed files: %w", err)
+	}
+
+	directlyChanged := make(map[string]bool)
+	for _, absFile := range changedFiles {
+		if pkg, ok := ws.PackageByPath(absFile); ok {
+			directlyChanged[pkg.Name] = true
 		}
 	}
 
-	changedFiles := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(directlyChanged) == 0 {
+		return nil, nil
+	}
 
+	// Build reverse dep graph: pkg → list of packages that depend on it.
+	pkgByName := make(map[string]workspace.Package, len(ws.Packages))
+	for _, p := range ws.Packages {
+		pkgByName[p.Name] = p
+	}
+
+	// reverseDeps[A] = [B, C] means B and C depend on A.
+	reverseDeps := make(map[string][]string, len(ws.Packages))
+	for _, p := range ws.Packages {
+		deps := readWorkspaceDeps(p.Dir, pkgByName)
+		for _, dep := range deps {
+			reverseDeps[dep] = append(reverseDeps[dep], p.Name)
+		}
+	}
+
+	// BFS from directly changed packages through reverse dep graph.
+	visited := make(map[string]bool)
+	queue := make([]string, 0, len(directlyChanged))
+	for name := range directlyChanged {
+		if !visited[name] {
+			visited[name] = true
+			queue = append(queue, name)
+		}
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, dependent := range reverseDeps[current] {
+			if !visited[dependent] {
+				visited[dependent] = true
+				queue = append(queue, dependent)
+			}
+		}
+	}
+
+	// Collect results preserving workspace order.
+	var result []workspace.Package
+	for _, p := range ws.Packages {
+		if visited[p.Name] {
+			result = append(result, p)
+		}
+	}
+	return result, nil
+}
+
+// collectChangedFiles returns absolute paths of changed files using the given strategy.
+func collectChangedFiles(wsRoot, strategy, command string) ([]string, error) {
+	switch strategy {
+	case "git":
+		return gitChangedFiles(wsRoot, wsRoot)
+	case "submodules":
+		return submoduleChangedFiles(wsRoot)
+	case "command":
+		if command == "" {
+			return nil, fmt.Errorf("affected.strategy=command requires affected.command to be set")
+		}
+		return commandChangedFiles(wsRoot, command)
+	default:
+		return nil, fmt.Errorf("unknown affected.strategy %q (valid: git, submodules, command)", strategy)
+	}
+}
+
+// gitChangedFiles runs `git diff --name-only HEAD` in dir and returns absolute paths.
+func gitChangedFiles(wsRoot, dir string) ([]string, error) {
+	cmd := exec.Command("git", "diff", "--name-only", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		// Also try staged files (for fresh repos with no HEAD)
+		cmd2 := exec.Command("git", "diff", "--name-only", "--cached")
+		cmd2.Dir = dir
+		out2, err2 := cmd2.Output()
+		if err2 != nil {
+			return nil, err // return original error
+		}
+		out = out2
+	}
+
+	// Also include unstaged changes
+	cmd3 := exec.Command("git", "diff", "--name-only")
+	cmd3.Dir = dir
+	if out3, err3 := cmd3.Output(); err3 == nil {
+		out = append(out, out3...)
+	}
+
+	return parseFileList(wsRoot, dir, out), nil
+}
+
+// submoduleChangedFiles reads .gitmodules to find submodule roots,
+// then runs git diff inside each one.
+func submoduleChangedFiles(wsRoot string) ([]string, error) {
+	roots, err := readSubmoduleRoots(wsRoot)
+	if err != nil || len(roots) == 0 {
+		// Fall back to single git diff in ws root
+		return gitChangedFiles(wsRoot, wsRoot)
+	}
+
+	var all []string
+	for _, root := range roots {
+		files, err := gitChangedFiles(wsRoot, root)
+		if err != nil {
+			continue // skip repos with no commits yet
+		}
+		all = append(all, files...)
+	}
+	return all, nil
+}
+
+// commandChangedFiles executes a custom command and reads file paths from stdout.
+func commandChangedFiles(wsRoot, command string) ([]string, error) {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("empty command")
+	}
+	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd.Dir = wsRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("command %q failed: %w", command, err)
+	}
+	return parseFileList(wsRoot, wsRoot, out), nil
+}
+
+// readSubmoduleRoots parses .gitmodules to find submodule absolute paths.
+func readSubmoduleRoots(wsRoot string) ([]string, error) {
+	data, err := os.ReadFile(wsRoot + "/.gitmodules")
+	if err != nil {
+		return nil, err
+	}
+	var roots []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "path = ") {
+			rel := strings.TrimPrefix(line, "path = ")
+			abs := wsRoot + "/" + strings.TrimSpace(rel)
+			roots = append(roots, abs)
+		}
+	}
+	return roots, nil
+}
+
+// parseFileList converts raw `git diff --name-only` output to absolute paths.
+// Lines that are relative are resolved against repoRoot.
+// Lines that are already absolute are used as-is.
+func parseFileList(wsRoot, repoRoot string, raw []byte) []string {
+	var result []string
 	seen := make(map[string]bool)
-	var affected []workspace.Package
-
-	for _, relFile := range changedFiles {
-		if relFile == "" {
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		absFile := ws.Root + "/" + relFile
-		pkg, ok := ws.PackageByPath(absFile)
-		if ok && !seen[pkg.Name] {
-			seen[pkg.Name] = true
-			affected = append(affected, *pkg)
+		var abs string
+		if strings.HasPrefix(line, "/") {
+			abs = line
+		} else {
+			abs = repoRoot + "/" + line
+		}
+		if !seen[abs] {
+			seen[abs] = true
+			result = append(result, abs)
 		}
 	}
-
-	return affected, nil
+	_ = wsRoot // available for future use (e.g. relative path normalization)
+	return result
 }

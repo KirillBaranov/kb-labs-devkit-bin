@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,17 +16,19 @@ import (
 
 // Executor runs a single (package, task) pair with cache lookup/store.
 type Executor struct {
-	objects   cache.ObjectStore
-	manifests *cache.ManifestStore
-	wsRoot    string
+	objects    cache.ObjectStore
+	manifests  *cache.ManifestStore
+	wsRoot     string
+	liveOutput bool // stream stdout/stderr while running
 }
 
 // NewExecutor creates an Executor backed by the given cache stores.
-func NewExecutor(objects cache.ObjectStore, manifests *cache.ManifestStore, wsRoot string) *Executor {
+func NewExecutor(objects cache.ObjectStore, manifests *cache.ManifestStore, wsRoot string, liveOutput bool) *Executor {
 	return &Executor{
-		objects:   objects,
-		manifests: manifests,
-		wsRoot:    wsRoot,
+		objects:    objects,
+		manifests:  manifests,
+		wsRoot:     wsRoot,
+		liveOutput: liveOutput,
 	}
 }
 
@@ -114,21 +117,27 @@ func (e *Executor) Run(pkg workspace.Package, def TaskDef, noCache bool) TaskRes
 }
 
 // runCommand executes a shell command in dir, returning stdout, stderr, exit code.
+// If e.liveOutput is true, output is also streamed to os.Stdout/os.Stderr in real time.
 func (e *Executor) runCommand(command, dir string) (stdout, stderr string, exitCode int, err error) {
-	// Split command into binary + args, respecting simple quoting.
 	parts := splitCommand(command)
 	if len(parts) == 0 {
 		return "", "", 1, fmt.Errorf("empty command")
 	}
 
-	// Resolve binary: check workspace node_modules/.bin first.
 	bin := resolveBin(parts[0], e.wsRoot)
 
 	var outBuf, errBuf bytes.Buffer
+
+	var outW, errW io.Writer = &outBuf, &errBuf
+	if e.liveOutput {
+		outW = io.MultiWriter(&outBuf, os.Stdout)
+		errW = io.MultiWriter(&errBuf, os.Stderr)
+	}
+
 	cmd := exec.Command(bin, parts[1:]...)
 	cmd.Dir = dir
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
+	cmd.Stdout = outW
+	cmd.Stderr = errW
 	cmd.Env = append(os.Environ(),
 		"NODE_PATH="+filepath.Join(e.wsRoot, "node_modules"),
 	)

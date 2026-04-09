@@ -8,8 +8,23 @@ type DevkitConfig struct {
 	Sync      SyncConfig                 `yaml:"sync"`
 	Build     BuildConfig                `yaml:"build"`
 	Tasks     map[string]TaskConfig      `yaml:"tasks"`
+	Affected  AffectedConfig             `yaml:"affected"`
 	Presets   map[string]Preset          `yaml:"presets"`
 	Custom    []CustomCheck              `yaml:"custom_checks"`
+}
+
+// AffectedConfig controls how changed packages are detected.
+type AffectedConfig struct {
+	// Strategy: "git" (default) | "submodules" | "command"
+	//   git        — single `git diff --name-only HEAD` from ws root; works for monorepos without submodules
+	//   submodules — walks .gitmodules, runs `git diff` inside each submodule repo
+	//   command    — executes Command, expects one file path per line on stdout
+	Strategy string `yaml:"strategy"`
+
+	// Command is used when Strategy == "command".
+	// Executed in workspace root. Output: one absolute or workspace-relative path per line.
+	// Example: "./scripts/changed-files.sh"
+	Command string `yaml:"command"`
 }
 
 // TaskConfig defines a named task in devkit.yaml.

@@ -29,8 +29,23 @@ type yamlConfig struct {
 	Workspace yamlWorkspace                `yaml:"workspace"`
 	Sync      yamlSync                     `yaml:"sync"`
 	Build     yamlBuild                    `yaml:"build"`
+	Tasks     map[string]yamlTask          `yaml:"tasks"`
+	Affected  yamlAffected                 `yaml:"affected"`
 	Presets   map[string]yamlPreset        `yaml:"presets"`
 	Custom    []yamlCustomCheck            `yaml:"custom_checks"`
+}
+
+type yamlTask struct {
+	Command string   `yaml:"command"`
+	Inputs  []string `yaml:"inputs"`
+	Outputs []string `yaml:"outputs"`
+	Deps    []string `yaml:"deps"`
+	Cache   *bool    `yaml:"cache"`
+}
+
+type yamlAffected struct {
+	Strategy string `yaml:"strategy"`
+	Command  string `yaml:"command"`
 }
 
 type yamlWorkspace struct {
@@ -143,6 +158,10 @@ func mapYAML(raw yamlConfig) *DevkitConfig {
 			Cache:       raw.Build.Cache,
 			Concurrency: raw.Build.Concurrency,
 		},
+		Affected: AffectedConfig{
+			Strategy: raw.Affected.Strategy,
+			Command:  raw.Affected.Command,
+		},
 	}
 
 	// Categories
@@ -185,6 +204,20 @@ func mapYAML(raw yamlConfig) *DevkitConfig {
 			From:   t.From,
 			To:     t.To,
 		})
+	}
+
+	// Tasks
+	if raw.Tasks != nil {
+		cfg.Tasks = make(map[string]TaskConfig, len(raw.Tasks))
+		for k, v := range raw.Tasks {
+			cfg.Tasks[k] = TaskConfig{
+				Command: v.Command,
+				Inputs:  v.Inputs,
+				Outputs: v.Outputs,
+				Deps:    v.Deps,
+				Cache:   v.Cache,
+			}
+		}
 	}
 
 	// Custom checks

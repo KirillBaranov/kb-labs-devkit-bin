@@ -15,6 +15,7 @@ var (
 	runAffected    bool
 	runPackages    []string
 	runNoCache     bool
+	runLive        bool
 	runConcurrency int
 )
 
@@ -45,7 +46,7 @@ Examples:
 		var pkgs []workspace.Package
 		switch {
 		case runAffected:
-			pkgs, err = engine.AffectedPackages(ws)
+			pkgs, err = engine.AffectedPackages(ws, cfg)
 			if err != nil {
 				return fmt.Errorf("affected: %w", err)
 			}
@@ -67,6 +68,7 @@ Examples:
 			Tasks:       args,
 			Packages:    pkgs,
 			NoCache:     runNoCache,
+			LiveOutput:  runLive,
 			Concurrency: runConcurrency,
 			WSRoot:      ws.Root,
 			CacheRoot:   cacheRoot,
@@ -153,9 +155,10 @@ Examples:
 }
 
 func init() {
-	runCmd.Flags().BoolVar(&runAffected, "affected", false, "run only packages changed since last commit")
+	runCmd.Flags().BoolVar(&runAffected, "affected", false, "run only changed packages + all downstream dependents")
 	runCmd.Flags().StringSliceVar(&runPackages, "packages", nil, "run specific packages (comma-separated)")
 	runCmd.Flags().BoolVar(&runNoCache, "no-cache", false, "bypass cache lookup (still stores result)")
+	runCmd.Flags().BoolVar(&runLive, "live", false, "stream output while running (forces concurrency=1)")
 	runCmd.Flags().IntVar(&runConcurrency, "concurrency", 0, "parallel task limit (default: NumCPU-1)")
 	rootCmd.AddCommand(runCmd)
 }
