@@ -42,6 +42,11 @@ Examples:
 			return err
 		}
 
+		// Require tasks to be declared in devkit.yaml.
+		if len(cfg.Tasks) == 0 {
+			return fmt.Errorf("no tasks defined in devkit.yaml\n\n  Add a tasks: section or run `kb-devkit init` to generate a starter config")
+		}
+
 		// Resolve package filter.
 		var pkgs []workspace.Package
 		switch {
