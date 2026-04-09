@@ -35,12 +35,44 @@ type yamlConfig struct {
 	Custom    []yamlCustomCheck            `yaml:"custom_checks"`
 }
 
-type yamlTask struct {
-	Command string   `yaml:"command"`
-	Inputs  []string `yaml:"inputs"`
-	Outputs []string `yaml:"outputs"`
-	Deps    []string `yaml:"deps"`
-	Cache   *bool    `yaml:"cache"`
+// yamlTaskVariant is one variant of a task (single object in YAML).
+type yamlTaskVariant struct {
+	Categories []string `yaml:"categories"`
+	Command    string   `yaml:"command"`
+	Inputs     []string `yaml:"inputs"`
+	Outputs    []string `yaml:"outputs"`
+	Deps       []string `yaml:"deps"`
+	Cache      *bool    `yaml:"cache"`
+}
+
+// yamlTask accepts both a single object and a list of variants:
+//
+//	tasks:
+//	  build:                         # single variant (no categories)
+//	    command: tsup
+//	    inputs: [...]
+//
+//	  build:                         # multiple variants
+//	    - categories: [ts-lib]
+//	      command: tsup
+//	    - categories: [go-binary]
+//	      command: make build
+type yamlTask []yamlTaskVariant
+
+func (t *yamlTask) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// Try list first.
+	var list []yamlTaskVariant
+	if err := unmarshal(&list); err == nil {
+		*t = list
+		return nil
+	}
+	// Fall back to single object (no categories = catch-all).
+	var single yamlTaskVariant
+	if err := unmarshal(&single); err != nil {
+		return err
+	}
+	*t = []yamlTaskVariant{single}
+	return nil
 }
 
 type yamlAffected struct {
@@ -203,14 +235,19 @@ func mapYAML(raw yamlConfig) *DevkitConfig {
 	// Tasks
 	if raw.Tasks != nil {
 		cfg.Tasks = make(map[string]TaskConfig, len(raw.Tasks))
-		for k, v := range raw.Tasks {
-			cfg.Tasks[k] = TaskConfig{
-				Command: v.Command,
-				Inputs:  v.Inputs,
-				Outputs: v.Outputs,
-				Deps:    v.Deps,
-				Cache:   v.Cache,
+		for k, variants := range raw.Tasks {
+			tc := make(TaskConfig, len(variants))
+			for i, v := range variants {
+				tc[i] = TaskVariant{
+					Categories: v.Categories,
+					Command:    v.Command,
+					Inputs:     v.Inputs,
+					Outputs:    v.Outputs,
+					Deps:       v.Deps,
+					Cache:      v.Cache,
+				}
 			}
+			cfg.Tasks[k] = tc
 		}
 	}
 

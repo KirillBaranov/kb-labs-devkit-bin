@@ -27,14 +27,42 @@ type AffectedConfig struct {
 	Command string `yaml:"command"`
 }
 
-// TaskConfig defines a named task in devkit.yaml.
-// Tasks are the unit of cached execution: build, lint, test, deploy, etc.
-type TaskConfig struct {
-	Command string   `yaml:"command"`
-	Inputs  []string `yaml:"inputs"`  // glob patterns relative to package dir
-	Outputs []string `yaml:"outputs"` // glob patterns; empty = no output files (cache exit code)
-	Deps    []string `yaml:"deps"`    // "^build" = deps' task first; "build" = self's task first
-	Cache   *bool    `yaml:"cache"`   // nil = true; false = always run (e.g. deploy)
+// TaskVariant is one implementation of a named task.
+// Multiple variants can exist under the same task name — the scheduler picks
+// the one whose Categories matches the package's category.
+// If Categories is empty, the variant applies to all packages (catch-all).
+type TaskVariant struct {
+	Categories []string `yaml:"categories"` // e.g. ["ts-lib", "ts-app"]; empty = all
+	Command    string   `yaml:"command"`
+	Inputs     []string `yaml:"inputs"`  // glob patterns relative to package dir
+	Outputs    []string `yaml:"outputs"` // glob patterns; empty = cache exit code only
+	Deps       []string `yaml:"deps"`    // "^build" = deps' task first; "build" = self's task first
+	Cache      *bool    `yaml:"cache"`   // nil = true; false = always run (e.g. deploy)
+}
+
+// TaskConfig is a list of variants for a named task.
+// Variants are evaluated in order; the first matching category wins.
+type TaskConfig []TaskVariant
+
+// ResolveVariant returns the first variant whose categories include pkgCategory,
+// or the first catch-all variant (empty categories), or nil if none match.
+func (tc TaskConfig) ResolveVariant(pkgCategory string) *TaskVariant {
+	var catchAll *TaskVariant
+	for i := range tc {
+		v := &tc[i]
+		if len(v.Categories) == 0 {
+			if catchAll == nil {
+				catchAll = v
+			}
+			continue
+		}
+		for _, c := range v.Categories {
+			if c == pkgCategory {
+				return v
+			}
+		}
+	}
+	return catchAll
 }
 
 // WorkspaceConfig describes package categories and the package manager.

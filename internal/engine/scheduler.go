@@ -66,13 +66,9 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 		pkgs = ws.Packages
 	}
 
-	// Resolve task definitions.
-	taskDefs := ResolveTaskDefs(cfg, opts.Tasks)
-
-	// Validate all tasks have commands.
+	// Validate all requested tasks exist in config (at least one variant).
 	for _, name := range opts.Tasks {
-		def := taskDefs[name]
-		if def.Command == "" {
+		if _, ok := cfg.Tasks[name]; !ok {
 			return RunResult{}, fmt.Errorf("unknown task %q — add it to devkit.yaml tasks: section", name)
 		}
 	}
@@ -89,8 +85,8 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 	manifests := cache.NewManifestStore(cacheRoot)
 	executor := NewExecutor(objects, manifests, opts.WSRoot, opts.LiveOutput)
 
-	// Build DAG of (pkg, task) nodes.
-	nodes, err := buildDAG(pkgs, opts.Tasks, taskDefs, ws)
+	// Build DAG of (pkg, task) nodes — only for packages with a matching variant.
+	nodes, err := buildDAG(pkgs, opts.Tasks, cfg, ws)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -138,7 +134,7 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 		layer := queue
 		queue = nil
 
-		layerResults := runLayer(layer, nodes, executor, taskDefs, opts.NoCache, concurrency)
+		layerResults := runLayer(layer, nodes, executor, cfg, opts.NoCache, concurrency)
 		allResults = append(allResults, layerResults...)
 
 		for _, r := range layerResults {
@@ -188,7 +184,7 @@ type dagNode struct {
 func buildDAG(
 	pkgs []workspace.Package,
 	taskNames []string,
-	taskDefs map[string]TaskDef,
+	cfg *config.DevkitConfig,
 	ws *workspace.Workspace,
 ) (map[nodeKey]dagNode, error) {
 	// Build package name → Package map.
@@ -202,9 +198,14 @@ func buildDAG(
 
 	nodes := make(map[nodeKey]dagNode)
 
-	// Create a node for every (pkg, task) pair.
+	// Create a node for every (pkg, task) pair where a variant matches the pkg category.
 	for _, p := range pkgs {
 		for _, taskName := range taskNames {
+			def := ResolveTaskDef(cfg, taskName, p.Category)
+			if def == nil {
+				// No variant for this package category — skip silently.
+				continue
+			}
 			k := nodeKey{p.Name, taskName}
 			nodes[k] = dagNode{pkg: p, task: taskName}
 		}
@@ -212,7 +213,10 @@ func buildDAG(
 
 	// Resolve deps for each node.
 	for k, n := range nodes {
-		def := taskDefs[k.task]
+		def := ResolveTaskDef(cfg, k.task, n.pkg.Category)
+		if def == nil {
+			continue
+		}
 		var deps []nodeKey
 
 		for _, dep := range def.Deps {
@@ -282,7 +286,7 @@ func runLayer(
 	layer []nodeKey,
 	nodes map[nodeKey]dagNode,
 	executor *Executor,
-	taskDefs map[string]TaskDef,
+	cfg *config.DevkitConfig,
 	noCache bool,
 	concurrency int,
 ) []TaskResult {
@@ -299,8 +303,13 @@ func runLayer(
 			defer func() { <-sem }()
 
 			n := nodes[k]
-			def := taskDefs[k.task]
-			results[i] = executor.Run(n.pkg, def, noCache)
+			def := ResolveTaskDef(cfg, k.task, n.pkg.Category)
+			if def == nil {
+				// Should not happen — node was created only if variant matched.
+				results[i] = TaskResult{Package: k.pkg, Task: k.task, OK: false, Error: "no variant matched"}
+				return
+			}
+			results[i] = executor.Run(n.pkg, *def, noCache)
 		}()
 	}
 

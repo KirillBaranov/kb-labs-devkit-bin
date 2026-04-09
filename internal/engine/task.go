@@ -9,7 +9,8 @@ import (
 	"github.com/kb-labs/devkit/internal/config"
 )
 
-// TaskDef is the resolved definition of one named task.
+// TaskDef is the resolved definition of one (package, task) pair.
+// Resolution picks the correct variant from TaskConfig based on the package category.
 type TaskDef struct {
 	Name    string
 	Command string
@@ -34,80 +35,27 @@ type TaskResult struct {
 	Error    string
 }
 
-// ResolveTaskDefs returns the effective task definitions for a given config.
-// Config tasks override built-in defaults; missing tasks fall back to defaults.
-func ResolveTaskDefs(cfg *config.DevkitConfig, names []string) map[string]TaskDef {
-	defaults := defaultTaskDefs()
-	result := make(map[string]TaskDef, len(names))
-
-	for _, name := range names {
-		def, ok := defaults[name]
-
-		// Config override.
-		if cfg != nil {
-			if ct, has := cfg.Tasks[name]; has {
-				cacheVal := true
-				if ct.Cache != nil {
-					cacheVal = *ct.Cache
-				}
-				def = TaskDef{
-					Name:    name,
-					Command: ct.Command,
-					Inputs:  ct.Inputs,
-					Outputs: ct.Outputs,
-					Deps:    ct.Deps,
-					Cache:   cacheVal,
-				}
-				ok = true
-			}
-		}
-
-		if !ok {
-			// Unknown task — create minimal def so the engine can report the error.
-			def = TaskDef{Name: name, Cache: true}
-		}
-
-		result[name] = def
+// ResolveTaskDef returns the TaskDef for a specific (task name, package category) pair.
+// Returns nil if no variant matches the package category — the package is skipped for this task.
+func ResolveTaskDef(cfg *config.DevkitConfig, taskName, pkgCategory string) *TaskDef {
+	tc, ok := cfg.Tasks[taskName]
+	if !ok {
+		return nil
 	}
-
-	return result
-}
-
-// defaultTaskDefs returns built-in task definitions that work for any
-// node-lib / node-app preset without configuration.
-func defaultTaskDefs() map[string]TaskDef {
-	return map[string]TaskDef{
-		"build": {
-			Name:    "build",
-			Command: "tsup",
-			Inputs:  []string{"src/**", "tsup.config.ts", "tsup.config.js", "tsconfig*.json"},
-			Outputs: []string{"dist/**"},
-			Deps:    []string{"^build"},
-			Cache:   true,
-		},
-		"lint": {
-			Name:    "lint",
-			Command: "eslint src/",
-			Inputs:  []string{"src/**", "eslint.config.*", ".eslintrc*", ".eslintignore"},
-			Outputs: []string{},
-			Deps:    []string{},
-			Cache:   true,
-		},
-		"type-check": {
-			Name:    "type-check",
-			Command: "tsc --noEmit",
-			Inputs:  []string{"src/**", "tsconfig.json", "tsconfig*.json"},
-			Outputs: []string{},
-			Deps:    []string{"^build"},
-			Cache:   true,
-		},
-		"test": {
-			Name:    "test",
-			Command: "vitest run",
-			Inputs:  []string{"src/**", "test/**", "__tests__/**", "vitest.config.*"},
-			Outputs: []string{"coverage/**"},
-			Deps:    []string{"build"},
-			Cache:   true,
-		},
+	v := tc.ResolveVariant(pkgCategory)
+	if v == nil {
+		return nil
+	}
+	cacheVal := true
+	if v.Cache != nil {
+		cacheVal = *v.Cache
+	}
+	return &TaskDef{
+		Name:    taskName,
+		Command: v.Command,
+		Inputs:  v.Inputs,
+		Outputs: v.Outputs,
+		Deps:    v.Deps,
+		Cache:   cacheVal,
 	}
 }
