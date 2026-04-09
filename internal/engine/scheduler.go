@@ -95,11 +95,15 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 		return RunResult{}, err
 	}
 
-	// Concurrency. Live output forces 1 to avoid interleaved lines.
+	// Concurrency priority: --concurrency flag > devkit.yaml run.concurrency > NumCPU-1.
+	// Live output forces 1 to avoid interleaved lines.
 	concurrency := opts.Concurrency
 	if opts.LiveOutput {
 		concurrency = 1
 	} else if concurrency <= 0 {
+		concurrency = cfg.Run.Concurrency
+	}
+	if concurrency <= 0 {
 		concurrency = runtime.NumCPU()
 		if concurrency > 1 {
 			concurrency--

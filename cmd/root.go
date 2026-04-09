@@ -32,29 +32,28 @@ func SetVersionInfo(version, commit, date string) {
 var rootCmd = &cobra.Command{
 	Use:   "kb-devkit",
 	Short: "Workspace quality manager for Node.js and Go monorepos",
-	Long: `kb-devkit enforces standards, syncs configs, and manages builds
-across all packages in a monorepo. Declaratively configured via devkit.yaml.
+	Long: `kb-devkit is a workspace orchestrator for Node.js and Go monorepos.
+Content-addressable task caching, affected-package detection, and quality
+checks — declaratively configured via devkit.yaml.
 
 Commands:
-  check    [--package X] [--only scripts,deps] [--json]
+  run      <task> [task2 ...] [--affected] [--no-cache] [--json]
+  init     create a starter devkit.yaml
+  check    [--package X] [--json]
   fix      [--package X] [--dry-run] [--json]
+  stats    workspace health score
   status   [--json]
   watch    [--json]
-  gate     (pre-commit: checks staged files only)
-  sync     [--check] [--dry-run] [--source X] [--json]
-  build    [--runner turbo|native|custom] [--affected] [--json]
-  generate [--type node-lib|node-cli|go-binary] [--name @scope/pkg]
+  gate     pre-commit check on staged files
+  sync     [--check] [--dry-run] [--json]
   doctor   [--json]
-  deps     [--circular] [--outdated] [--why @scope/pkg] [--json]
-  run      <script>
 
 Examples:
+  kb-devkit init                              create devkit.yaml
+  kb-devkit run build                         build all packages (cached)
+  kb-devkit run build lint test --affected    only changed packages
   kb-devkit check --json                      machine-readable check results
-  kb-devkit check --package @kb-labs/core     check single package
-  kb-devkit sync --check                      show config drift
-  kb-devkit build --affected                  build only changed packages
-  kb-devkit status                            workspace health table
-  kb-devkit watch --json                      stream violations as JSONL`,
+  kb-devkit stats                             workspace health score`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

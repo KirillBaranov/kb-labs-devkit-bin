@@ -6,7 +6,7 @@ type DevkitConfig struct {
 	Version   int                        `yaml:"version"`
 	Workspace WorkspaceConfig            `yaml:"workspace"`
 	Sync      SyncConfig                 `yaml:"sync"`
-	Build     BuildConfig                `yaml:"build"`
+	Run       RunConfig                  `yaml:"run"`
 	Tasks     map[string]TaskConfig      `yaml:"tasks"`
 	Affected  AffectedConfig             `yaml:"affected"`
 	Presets   map[string]Preset          `yaml:"presets"`
@@ -144,14 +144,13 @@ type SyncTarget struct {
 	To     string `yaml:"to"`     // destination path relative to submodule root
 }
 
-// ─── Build ───────────────────────────────────────────────────────────────────
+// ─── Run ─────────────────────────────────────────────────────────────────────
 
-// BuildConfig describes the build runner configuration.
-type BuildConfig struct {
-	Runner      string `yaml:"runner"`      // native | turbo | custom
-	Command     string `yaml:"command"`     // for runner: custom
-	Cache       bool   `yaml:"cache"`
-	Concurrency int    `yaml:"concurrency"`
+// RunConfig controls execution engine defaults.
+type RunConfig struct {
+	// Concurrency is the max number of parallel (package, task) pairs.
+	// Default: NumCPU-1. Override with --concurrency flag or this field.
+	Concurrency int `yaml:"concurrency"`
 }
 
 // ─── Custom checks ────────────────────────────────────────────────────────────

@@ -28,7 +28,7 @@ type yamlConfig struct {
 	Version   int                          `yaml:"version"`
 	Workspace yamlWorkspace                `yaml:"workspace"`
 	Sync      yamlSync                     `yaml:"sync"`
-	Build     yamlBuild                    `yaml:"build"`
+	Run       yamlRun                      `yaml:"run"`
 	Tasks     map[string]yamlTask          `yaml:"tasks"`
 	Affected  yamlAffected                 `yaml:"affected"`
 	Presets   map[string]yamlPreset        `yaml:"presets"`
@@ -131,11 +131,8 @@ type yamlSyncTarget struct {
 	To     string `yaml:"to"`
 }
 
-type yamlBuild struct {
-	Runner      string `yaml:"runner"`
-	Command     string `yaml:"command"`
-	Cache       bool   `yaml:"cache"`
-	Concurrency int    `yaml:"concurrency"`
+type yamlRun struct {
+	Concurrency int `yaml:"concurrency"`
 }
 
 type yamlCustomCheck struct {
@@ -152,11 +149,8 @@ func mapYAML(raw yamlConfig) *DevkitConfig {
 			PackageManager: raw.Workspace.PackageManager,
 			MaxDepth:       raw.Workspace.MaxDepth,
 		},
-		Build: BuildConfig{
-			Runner:      raw.Build.Runner,
-			Command:     raw.Build.Command,
-			Cache:       raw.Build.Cache,
-			Concurrency: raw.Build.Concurrency,
+		Run: RunConfig{
+			Concurrency: raw.Run.Concurrency,
 		},
 		Affected: AffectedConfig{
 			Strategy: raw.Affected.Strategy,
