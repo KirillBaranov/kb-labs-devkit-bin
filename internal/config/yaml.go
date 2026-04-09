@@ -36,6 +36,7 @@ type yamlConfig struct {
 type yamlWorkspace struct {
 	PackageManager string                      `yaml:"packageManager"`
 	Categories     map[string]yamlCategory     `yaml:"categories"`
+	MaxDepth       int                         `yaml:"maxDepth"`
 }
 
 type yamlCategory struct {
@@ -134,6 +135,7 @@ func mapYAML(raw yamlConfig) *DevkitConfig {
 		Version: raw.Version,
 		Workspace: WorkspaceConfig{
 			PackageManager: raw.Workspace.PackageManager,
+			MaxDepth:       raw.Workspace.MaxDepth,
 		},
 		Build: BuildConfig{
 			Runner:      raw.Build.Runner,

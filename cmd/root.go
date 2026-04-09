@@ -16,8 +16,9 @@ var errSilent = errors.New("")
 
 // Global flags accessible to all subcommands.
 var (
-	jsonMode   bool
+	jsonMode  bool
 	configPath string
+	depthFlag  int // 0 = use devkit.yaml value or default
 )
 
 // SetVersionInfo is called from main.go with values injected at build time via -ldflags.
@@ -83,4 +84,5 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&jsonMode, "json", false, "output as structured JSON")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to devkit.yaml (default: auto-discover)")
+	rootCmd.PersistentFlags().IntVar(&depthFlag, "depth", 0, "max recursion depth for ** globs (overrides devkit.yaml maxDepth)")
 }

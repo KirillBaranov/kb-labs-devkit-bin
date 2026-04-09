@@ -31,6 +31,11 @@ func loadWorkspace() (*workspace.Workspace, *config.DevkitConfig, error) {
 
 	root := config.RootDir(cfgPath)
 
+	// --depth flag overrides devkit.yaml maxDepth.
+	if depthFlag > 0 {
+		cfg.Workspace.MaxDepth = depthFlag
+	}
+
 	ws, err := workspace.New(root, cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("discover workspace: %w", err)

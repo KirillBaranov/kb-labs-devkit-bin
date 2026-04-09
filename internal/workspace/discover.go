@@ -3,41 +3,173 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/kb-labs/devkit/internal/config"
 )
 
-// discoverPackages reads pnpm-workspace.yaml, expands globs, finds package.json files,
-// and classifies each package against the categories in cfg.
+const defaultMaxDepth = 3
+
+// discoverPackages expands pnpm-workspace.yaml patterns efficiently.
+//
+// Algorithm: instead of globbing the entire filesystem, we expand wildcards
+// level-by-level using os.ReadDir. This is O(dirs_per_level × depth) instead
+// of O(total_files_in_workspace).
+//
+// Pattern semantics (pnpm-workspace.yaml subset):
+//   "platform/*/packages/**"  → expand * with ReadDir at each level
+//   "infra/kb-labs-devkit"    → literal path, stat package.json directly
+//
+// Recursion depth for ** is controlled by cfg.Workspace.MaxDepth (default 3).
 func discoverPackages(root string, cfg *config.DevkitConfig) ([]Package, error) {
 	patterns, err := readPnpmWorkspace(root)
 	if err != nil {
-		// No pnpm-workspace.yaml: try to fall back to package.json workspaces field.
 		patterns, err = readPackageJSONWorkspaces(root)
 		if err != nil {
 			return nil, err
 		}
 	}
 
+	maxDepth := cfg.Workspace.MaxDepth
+	if maxDepth <= 0 {
+		maxDepth = defaultMaxDepth
+	}
+
+	// Collect unique package dirs.
+	seen := make(map[string]bool)
 	var pkgDirs []string
-	fsys := os.DirFS(root)
 
 	for _, pattern := range patterns {
-		// Pattern may be "packages/*" or "platform/*/packages/*" etc.
-		// We match against package.json inside each dir.
-		globPattern := pattern + "/package.json"
-		matches, err := doublestar.Glob(fsys, globPattern)
-		if err != nil {
-			continue
-		}
-		for _, match := range matches {
-			dir := filepath.Join(root, filepath.Dir(match))
-			pkgDirs = append(pkgDirs, dir)
+		dirs := expandPattern(root, pattern, maxDepth)
+		for _, dir := range dirs {
+			if !seen[dir] {
+				seen[dir] = true
+				pkgDirs = append(pkgDirs, dir)
+			}
 		}
 	}
 
 	return classifyPackages(root, pkgDirs, cfg), nil
+}
+
+// expandPattern expands a single pnpm-workspace pattern into concrete package dirs.
+// A package dir is any directory containing a package.json file.
+func expandPattern(root, pattern string, maxDepth int) []string {
+	// Normalize: strip trailing slash and trailing /**
+	pattern = strings.TrimSuffix(pattern, "/")
+	isRecursive := strings.HasSuffix(pattern, "/**")
+	if isRecursive {
+		pattern = strings.TrimSuffix(pattern, "/**")
+	}
+
+	segments := strings.Split(pattern, "/")
+	candidates := expandSegments(root, segments)
+
+	var result []string
+	for _, dir := range candidates {
+		if isRecursive {
+			result = append(result, collectPackageDirs(dir, maxDepth)...)
+		} else {
+			// Literal dir — check if it has package.json.
+			if hasPackageJSON(dir) {
+				result = append(result, dir)
+			}
+		}
+	}
+	return result
+}
+
+// expandSegments resolves path segments level-by-level.
+// A segment of "*" expands to all subdirectories at that level.
+// All other segments are treated as literals.
+func expandSegments(root string, segments []string) []string {
+	current := []string{root}
+
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		if seg == "*" {
+			var next []string
+			for _, dir := range current {
+				entries, err := os.ReadDir(dir)
+				if err != nil {
+					continue
+				}
+				for _, e := range entries {
+					if e.IsDir() && !isHidden(e.Name()) {
+						next = append(next, filepath.Join(dir, e.Name()))
+					}
+				}
+			}
+			current = next
+		} else {
+			// Literal segment.
+			var next []string
+			for _, dir := range current {
+				candidate := filepath.Join(dir, seg)
+				if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+					next = append(next, candidate)
+				}
+			}
+			current = next
+		}
+	}
+
+	return current
+}
+
+// collectPackageDirs finds all directories containing package.json up to maxDepth levels deep.
+func collectPackageDirs(root string, maxDepth int) []string {
+	var result []string
+	collectPackageDirsInto(root, 0, maxDepth, &result)
+	return result
+}
+
+func collectPackageDirsInto(dir string, depth, maxDepth int, result *[]string) {
+	if depth > maxDepth {
+		return
+	}
+
+	if hasPackageJSON(dir) {
+		*result = append(*result, dir)
+		// Don't recurse into package subdirs (monorepo packages aren't nested).
+		return
+	}
+
+	if depth == maxDepth {
+		return
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() || isHidden(e.Name()) || isSkipped(e.Name()) {
+			continue
+		}
+		collectPackageDirsInto(filepath.Join(dir, e.Name()), depth+1, maxDepth, result)
+	}
+}
+
+func hasPackageJSON(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "package.json"))
+	return err == nil
+}
+
+func isHidden(name string) bool {
+	return strings.HasPrefix(name, ".")
+}
+
+// isSkipped returns true for directories we never need to recurse into.
+func isSkipped(name string) bool {
+	switch name {
+	case "node_modules", "dist", ".git", "__pycache__", ".turbo", "coverage":
+		return true
+	}
+	return false
 }
 
 // classifyPackages maps each package dir to a category+preset.
@@ -49,8 +181,7 @@ func classifyPackages(root string, dirs []string, cfg *config.DevkitConfig) []Pa
 
 		category, preset, language := classify(rel, cfg)
 		if category == "" {
-			// Uncategorized — skip silently.
-			continue
+			continue // uncategorized — skip silently
 		}
 
 		result = append(result, Package{
@@ -65,23 +196,16 @@ func classifyPackages(root string, dirs []string, cfg *config.DevkitConfig) []Pa
 	return result
 }
 
-// classify returns the category, preset, and language for a package relative path.
-// First match wins (order of categories in devkit.yaml is significant).
+// classify returns category/preset/language for a relative package path.
+// First match wins.
 func classify(relPath string, cfg *config.DevkitConfig) (category, preset, language string) {
 	if cfg == nil || cfg.Workspace.Categories == nil {
 		return "", "", ""
 	}
 
-	// YAML maps are unordered; we need a stable order.
-	// For now we iterate all and return first match.
-	// TODO: if ordering matters in practice, store categories as []struct in config.
 	for catName, cat := range cfg.Workspace.Categories {
 		for _, pattern := range cat.Match {
-			matched, err := doublestar.Match(pattern, relPath)
-			if err != nil {
-				continue
-			}
-			if matched {
+			if matchPattern(pattern, relPath) {
 				lang := cat.Language
 				if lang == "" {
 					lang = inferLanguage(cat.Preset)
@@ -93,11 +217,50 @@ func classify(relPath string, cfg *config.DevkitConfig) (category, preset, langu
 	return "", "", ""
 }
 
-func inferLanguage(preset string) string {
-	switch preset {
-	case "go-binary":
-		return "go"
-	default:
-		return "typescript"
+// matchPattern matches a pnpm-style glob pattern against a relative path.
+// Supports: literal segments, *, ** (suffix only).
+func matchPattern(pattern, relPath string) bool {
+	// Normalize pattern.
+	pattern = strings.TrimSuffix(pattern, "/")
+	isRecursive := strings.HasSuffix(pattern, "/**")
+	if isRecursive {
+		pattern = strings.TrimSuffix(pattern, "/**")
 	}
+
+	// Build a simple matcher segment by segment.
+	patSegs := strings.Split(pattern, "/")
+	pathSegs := strings.Split(relPath, "/")
+
+	if isRecursive {
+		// Pattern prefix must match the start of relPath.
+		if len(pathSegs) < len(patSegs) {
+			return false
+		}
+		return matchSegments(patSegs, pathSegs[:len(patSegs)])
+	}
+
+	// Exact segment count match.
+	if len(patSegs) != len(pathSegs) {
+		return false
+	}
+	return matchSegments(patSegs, pathSegs)
+}
+
+func matchSegments(pattern, path []string) bool {
+	for i, seg := range pattern {
+		if seg == "*" {
+			continue // matches any single segment
+		}
+		if seg != path[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func inferLanguage(preset string) string {
+	if preset == "go-binary" {
+		return "go"
+	}
+	return "typescript"
 }

@@ -15,6 +15,9 @@ type DevkitConfig struct {
 type WorkspaceConfig struct {
 	PackageManager string                     `yaml:"packageManager"`
 	Categories     map[string]CategoryConfig  `yaml:"categories"`
+	// MaxDepth controls how deep to recurse when expanding ** globs.
+	// Default: 3. Increase if your monorepo has deeply nested packages.
+	MaxDepth int `yaml:"maxDepth"`
 }
 
 // CategoryConfig matches packages to a preset by glob patterns.
