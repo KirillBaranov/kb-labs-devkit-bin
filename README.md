@@ -8,11 +8,41 @@ Go binary for workspace orchestration: quality checks, config sync, and task exe
 make build
 ```
 
+## Quick start
+
+```bash
+# Create starter config
+kb-devkit init
+
+# Build all packages (cached)
+kb-devkit run build
+
+# Second run — everything cached, <1s
+kb-devkit run build
+
+# Only changed packages + downstream dependents
+kb-devkit run build lint test --affected
+```
+
+---
+
 ## Commands
+
+### `init` — create devkit.yaml
+
+```bash
+kb-devkit init           # creates devkit.yaml with all sections commented as examples
+kb-devkit init --force   # overwrite existing
+```
+
+Generates a fully commented `devkit.yaml`. Uncomment the tasks you need and adjust.
+
+---
 
 ### `run` — task execution engine
 
-Runs named tasks across all packages in dependency order. Results are cached by input hash — identical inputs skip execution and restore outputs in milliseconds.
+Runs named tasks across all packages in dependency order with content-addressable caching.
+Tasks are defined in `devkit.yaml`. Each task can have multiple **variants** — one per package category.
 
 ```bash
 kb-devkit run build
@@ -21,7 +51,7 @@ kb-devkit run build lint test --affected
 kb-devkit run build --packages @kb-labs/core-types,@kb-labs/core-runtime
 kb-devkit run build --no-cache
 kb-devkit run build --live          # stream stdout/stderr in real time
-kb-devkit run build --json          # machine-readable output
+kb-devkit run build --json
 ```
 
 **Flags:**
@@ -29,18 +59,18 @@ kb-devkit run build --json          # machine-readable output
 | Flag | Description |
 |------|-------------|
 | `--affected` | Run only changed packages + all downstream dependents |
-| `--packages` | Comma-separated list of package names to run |
-| `--no-cache` | Bypass cache lookup (still stores result for next run) |
-| `--live` | Stream output while running (forces `concurrency=1`) |
-| `--concurrency N` | Max parallel tasks (default: `NumCPU-1`) |
+| `--packages` | Comma-separated list of package names |
+| `--no-cache` | Bypass cache lookup (still stores result) |
+| `--live` | Stream output in real time (forces `concurrency=1`) |
+| `--concurrency N` | Max parallel tasks (default: `run.concurrency` in yaml, then `NumCPU-1`) |
 
 **How caching works:**
 
-1. Hash all input files matching `inputs:` glob patterns
-2. Cache hit? → restore output files + return in ~1ms
+1. Hash all input files matching `inputs:` glob patterns → SHA256 key
+2. Cache hit → restore output files in ~1ms, mark `cached`
 3. Cache miss → run command → store outputs → write manifest
 
-Cache lives in `.kb/devkit/`. Objects are content-addressable (SHA256), so the same file in two packages is stored once.
+Cache lives in `.kb/devkit/`. Objects are content-addressable — the same file content in two packages is stored once.
 
 **`--affected` detection:**
 
@@ -61,49 +91,51 @@ After finding directly changed packages, BFS expands through the reverse depende
 ```bash
 kb-devkit check                           # check all packages
 kb-devkit check --package @kb-labs/core  # check single package
-kb-devkit check --json                    # machine-readable output
+kb-devkit check --json
+```
+
+Validates each package against the rules declared in its matched preset: naming, tsconfig, eslint, required scripts, deps, files.
+
+### `fix` — auto-fix violations
+
+```bash
+kb-devkit fix
+kb-devkit fix --dry-run
+kb-devkit fix --package @kb-labs/core
 ```
 
 ### `stats` — workspace health
 
 ```bash
-kb-devkit stats                           # health score A–F, issues breakdown
+kb-devkit stats           # health score A–F, issue counts by category
 kb-devkit stats --json
 ```
 
 ### `status` — package table
 
 ```bash
-kb-devkit status                          # table: name, category, preset, issues
+kb-devkit status          # table: name, category, preset, issues
 kb-devkit status --json
 ```
 
 ### `sync` — config sync
 
 ```bash
-kb-devkit sync --check                    # report drift without applying
-kb-devkit sync --dry-run                  # preview changes
-kb-devkit sync                            # apply sync
-```
-
-### `build` — native build runner
-
-```bash
-kb-devkit build                           # build all packages in topo order
-kb-devkit build --affected                # only changed packages
-kb-devkit build --runner turbo            # via turbo
+kb-devkit sync --check    # report drift without applying
+kb-devkit sync --dry-run  # preview changes
+kb-devkit sync            # apply
 ```
 
 ### `watch` — file watcher
 
 ```bash
-kb-devkit watch --json                    # stream violations as JSONL on save
+kb-devkit watch --json    # stream violations as JSONL on file save
 ```
 
 ### `gate` — pre-commit gate
 
 ```bash
-kb-devkit gate                            # check staged files only; exits 1 on violations
+kb-devkit gate            # check staged files only; exits 1 on violations
 ```
 
 ### `doctor` — environment diagnostics
@@ -116,87 +148,111 @@ kb-devkit doctor --json
 
 ## Configuration (`devkit.yaml`)
 
+### Task variants
+
+Each task can have multiple variants — selected by package category. The scheduler picks the first variant whose `categories` matches the package. Packages with no matching variant are silently skipped for that task.
+
 ```yaml
-version: 1
-
-workspace:
-  packageManager: pnpm
-  maxDepth: 3
-  categories:
-    ts-lib:
-      match: ["platform/*/packages/**"]
-      language: typescript
-      preset: node-lib
-
-# ── Task execution ───────────────────────────────────────────────────────────
-
 tasks:
   build:
-    command: tsup
-    inputs:
-      - "src/**"
-      - "tsup.config.ts"
-      - "tsconfig*.json"
-    outputs:
-      - "dist/**"
-    deps:
-      - "^build"      # run 'build' for all workspace deps first
+    # TypeScript libraries and apps
+    - categories: [ts-lib, ts-app]
+      command: tsup
+      inputs:
+        - "src/**"
+        - "tsup.config.ts"
+        - "tsconfig*.json"
+      outputs:
+        - "dist/**"
+      deps:
+        - "^build"      # run 'build' for all workspace deps first
+
+    # Go binaries
+    - categories: [go-binary]
+      command: make build
+      inputs:
+        - "**/*.go"
+        - "go.mod"
+        - "go.sum"
+        - "Makefile"
+
+    # Next.js sites
+    - categories: [site]
+      command: pnpm build
+      inputs:
+        - "app/**"
+        - "components/**"
+        - "next.config.*"
+      outputs:
+        - ".next/**"
+      deps:
+        - "^build"      # wait for ts-lib deps (e.g. @kb-labs/sdk)
 
   lint:
-    command: eslint src/
-    inputs:
-      - "src/**"
-      - "eslint.config.*"
-    outputs: []
-    deps: []
+    - categories: [ts-lib, ts-app]
+      command: eslint src/
+      inputs: ["src/**", "eslint.config.*"]
+
+    - categories: [site]
+      command: eslint app/ components/
+      inputs: ["app/**", "components/**", "eslint.config.*"]
 
   type-check:
-    command: tsc --noEmit
-    inputs:
-      - "src/**"
-      - "tsconfig*.json"
-    outputs: []
-    deps:
-      - "^build"      # needs deps' dist/**/*.d.ts
+    - categories: [ts-lib, ts-app, site]
+      command: tsc --noEmit
+      inputs: ["src/**", "tsconfig*.json"]
+      deps: ["^build"]
 
   test:
-    command: vitest run --passWithNoTests
-    inputs:
-      - "src/**"
-      - "test/**"
-      - "vitest.config.*"
-    outputs:
-      - "coverage/**"
-    deps:
-      - "build"       # tests run after own build
+    - categories: [ts-lib, ts-app]
+      command: vitest run --passWithNoTests
+      inputs: ["src/**", "test/**", "vitest.config.*"]
+      outputs: ["coverage/**"]
+      deps: ["build"]
 
   deploy:
+    - command: ./scripts/deploy.sh   # no categories = applies to all
+      inputs: ["dist/**"]
+      cache: false                   # always runs, never cached
+```
+
+**Single variant (shorthand)** — if a task applies to all packages and needs no category filter, write it as a plain object:
+
+```yaml
+tasks:
+  deploy:
     command: ./scripts/deploy.sh
-    inputs:
-      - "dist/**"
-    outputs: []
-    cache: false      # always runs, never cached
-
-# ── Affected detection ───────────────────────────────────────────────────────
-
-affected:
-  # strategy: git (default) | submodules | command
-  strategy: submodules
-  # command: ./scripts/changed-files.sh   # used when strategy: command
-
-# ── Presets, sync, build runner … (see devkit.yaml in workspace root) ────────
+    inputs: ["dist/**"]
+    cache: false
 ```
 
 ### Dep syntax
 
 | Value | Meaning |
 |-------|---------|
-| `^build` | Run `build` for every workspace dependency first |
+| `^build` | Run `build` for every workspace dependency first (like Turbo `^`) |
 | `build` | Run `build` for this same package first |
 
 ### `cache: false`
 
-Set on tasks that must always run (e.g. deploy, publish). The result is not stored.
+Set on tasks that must always run (e.g. deploy, publish). Result is not stored or restored from cache.
+
+### Concurrency
+
+```yaml
+run:
+  concurrency: 8   # max parallel (pkg, task) pairs; default: NumCPU-1
+```
+
+Override per-run with `--concurrency N`.
+
+### Affected detection
+
+```yaml
+affected:
+  strategy: submodules   # git | submodules | command
+  # command: ./scripts/changed-files.sh
+```
 
 ---
 
@@ -223,9 +279,9 @@ Same file content in two packages → one object. Rename-only change → new man
 
 ```
 cmd/
+  init.go         ← kb-devkit init (generate starter devkit.yaml)
   run.go          ← kb-devkit run (task engine entry)
   check.go        ← kb-devkit check
-  build.go        ← kb-devkit build (native runner)
   …
 
 internal/
@@ -234,15 +290,14 @@ internal/
     store.go      ← ObjectStore (LocalStore + interface for S3/R2)
     manifest.go   ← Manifest: inputHash → output refs + stdout
   engine/
-    task.go       ← TaskDef, TaskResult, ResolveTaskDefs
+    task.go       ← TaskDef, TaskResult, ResolveTaskDef(cfg, taskName, category)
     executor.go   ← hash → lookup → run → store
     scheduler.go  ← DAG builder (Kahn's), layer parallelism, AffectedPackages
   config/
-    config.go     ← DevkitConfig, TaskConfig, AffectedConfig, …
-    yaml.go       ← YAML parsing + mapping
+    config.go     ← DevkitConfig, TaskConfig ([]TaskVariant), AffectedConfig, …
+    yaml.go       ← YAML parsing — TaskVariant accepts single object or list
   workspace/
-    workspace.go  ← Package, Workspace, PackageByPath
+    workspace.go  ← Package (with Category field), Workspace, PackageByPath
     discover.go   ← glob-based package discovery
   checks/         ← individual quality check implementations
-  build/          ← NativeRunner, TurboRunner
 ```
