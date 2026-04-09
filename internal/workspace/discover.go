@@ -49,6 +49,27 @@ func discoverPackages(root string, cfg *config.DevkitConfig) ([]Package, error) 
 		}
 	}
 
+	// Also register any literal paths declared in category match patterns
+	// that are not covered by the workspace file (e.g. Go binaries not in pnpm-workspace.yaml).
+	// Only literal paths (no * or **) are considered here.
+	if cfg != nil {
+		for _, cat := range cfg.Workspace.Categories {
+			for _, pattern := range cat.Match {
+				if strings.ContainsAny(pattern, "*?") {
+					continue // glob — already handled by pnpm-workspace expansion
+				}
+				dir := filepath.Join(root, pattern)
+				if seen[dir] {
+					continue
+				}
+				if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+					seen[dir] = true
+					pkgDirs = append(pkgDirs, dir)
+				}
+			}
+		}
+	}
+
 	return classifyPackages(root, pkgDirs, cfg), nil
 }
 
@@ -68,10 +89,13 @@ func expandPattern(root, pattern string, maxDepth int) []string {
 	var result []string
 	for _, dir := range candidates {
 		if isRecursive {
+			// Recursive glob — only dirs with package.json are packages.
 			result = append(result, collectPackageDirs(dir, maxDepth)...)
 		} else {
-			// Literal dir — check if it has package.json.
-			if hasPackageJSON(dir) {
+			// Literal path — the user explicitly named this directory.
+			// Accept it if it exists, regardless of package.json presence.
+			// This allows Go binaries, Makefiles-only projects, etc.
+			if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 				result = append(result, dir)
 			}
 		}

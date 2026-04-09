@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,17 +61,34 @@ func readPackageJSONWorkspaces(root string) ([]string, error) {
 	return pkg.Workspaces, nil
 }
 
-// readPackageName reads the "name" field from a package's package.json.
+// readPackageName returns the canonical name for a package directory.
+// Resolution order:
+//  1. "name" field in package.json
+//  2. "module" directive in go.mod
+//  3. directory basename
 func readPackageName(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
-	if err != nil {
-		return filepath.Base(dir)
+	// 1. package.json
+	if data, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil {
+		var pkg struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(data, &pkg); err == nil && pkg.Name != "" {
+			return pkg.Name
+		}
 	}
-	var pkg struct {
-		Name string `json:"name"`
+
+	// 2. go.mod — use the module path as the package name
+	if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
+		for _, line := range strings.SplitN(string(data), "\n", 10) {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "module ") {
+				if mod := strings.TrimSpace(strings.TrimPrefix(line, "module ")); mod != "" {
+					return mod
+				}
+			}
+		}
 	}
-	if err := json.Unmarshal(data, &pkg); err != nil || pkg.Name == "" {
-		return filepath.Base(dir)
-	}
-	return pkg.Name
+
+	// 3. fallback
+	return filepath.Base(dir)
 }
