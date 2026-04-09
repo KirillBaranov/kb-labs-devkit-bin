@@ -11,6 +11,27 @@ import (
 	"github.com/kb-labs/devkit/internal/workspace"
 )
 
+// semverCompatible returns true if gotVer satisfies the wantVer range.
+// Handles the common monorepo case: want "^5", got "^5.6.3" → compatible.
+// Rule: if both have the same caret prefix and the same major version, it's compatible.
+func semverCompatible(got, want string) bool {
+	if got == want {
+		return true
+	}
+	// Strip caret/tilde prefix for comparison.
+	gotBase := strings.TrimLeft(got, "^~>=<")
+	wantBase := strings.TrimLeft(want, "^~>=<")
+
+	// Extract major version (first segment before ".").
+	gotMajor := strings.SplitN(gotBase, ".", 2)[0]
+	wantMajor := strings.SplitN(wantBase, ".", 2)[0]
+
+	// If majors match and the range prefix is the same, compatible.
+	gotPrefix := strings.TrimRight(got, "0123456789.-")
+	wantPrefix := strings.TrimRight(want, "0123456789.-")
+	return gotMajor == wantMajor && gotPrefix == wantPrefix
+}
+
 // PackageJSONRule checks package.json for required scripts, devDeps, fields, type, and engines.
 type PackageJSONRule struct{}
 
@@ -117,13 +138,15 @@ func (r *PackageJSONRule) Check(pkg workspace.Package, preset config.Preset) []I
 			continue
 		}
 		// Wildcard "*" means any version is OK.
-		if wantVer != "*" && gotVer != wantVer && !strings.HasPrefix(gotVer, "link:") && !strings.HasPrefix(gotVer, "workspace:") {
-			issues = append(issues, Issue{
-				Check:    r.Name(),
-				Severity: SeverityWarning,
-				Message:  fmt.Sprintf("devDependency %q version %q does not match expected %q", dep, gotVer, wantVer),
-				File:     path,
-			})
+		if wantVer != "*" && !strings.HasPrefix(gotVer, "link:") && !strings.HasPrefix(gotVer, "workspace:") {
+			if !semverCompatible(gotVer, wantVer) {
+				issues = append(issues, Issue{
+					Check:    r.Name(),
+					Severity: SeverityWarning,
+					Message:  fmt.Sprintf("devDependency %q version %q does not match expected %q", dep, gotVer, wantVer),
+					File:     path,
+				})
+			}
 		}
 	}
 

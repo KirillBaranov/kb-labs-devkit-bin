@@ -83,7 +83,8 @@ func (r *TSConfigRule) Check(pkg workspace.Package, preset config.Preset) []Issu
 	return issues
 }
 
-// stripTSConfigComments removes // line comments for basic JSON parsing.
+// stripTSConfigComments removes // line comments and trailing commas for basic JSON parsing.
+// tsconfig.json is JSONC (JSON with comments), so we strip comments and trailing commas.
 func stripTSConfigComments(data []byte) []byte {
 	lines := strings.Split(string(data), "\n")
 	var out []string
@@ -92,11 +93,53 @@ func stripTSConfigComments(data []byte) []byte {
 		if strings.HasPrefix(trimmed, "//") {
 			continue
 		}
-		// Remove inline comments (naive, doesn't handle // inside strings).
-		if idx := strings.Index(line, "//"); idx > 0 {
+		// Remove inline comments — only if // appears outside a string value.
+		// Heuristic: skip if the // is inside a quoted string (preceded by more " chars than closings).
+		if idx := indexOutsideString(line, "//"); idx > 0 {
 			line = line[:idx]
 		}
 		out = append(out, line)
 	}
-	return []byte(strings.Join(out, "\n"))
+	joined := strings.Join(out, "\n")
+	// Remove trailing commas before } or ] (common in JSONC).
+	// Simple approach: replace ",\s*}" and ",\s*]" patterns.
+	joined = removeTrailingCommas(joined)
+	return []byte(joined)
+}
+
+// indexOutsideString returns the index of needle in s only if it appears outside a quoted string.
+// Returns -1 if not found or if inside a string literal.
+func indexOutsideString(s, needle string) int {
+	inString := false
+	for i := 0; i < len(s)-len(needle)+1; i++ {
+		if s[i] == '"' && (i == 0 || s[i-1] != '\\') {
+			inString = !inString
+		}
+		if !inString && s[i:i+len(needle)] == needle {
+			return i
+		}
+	}
+	return -1
+}
+
+// removeTrailingCommas removes trailing commas before } or ] in JSON-like content.
+func removeTrailingCommas(s string) string {
+	var buf strings.Builder
+	runes := []rune(s)
+	n := len(runes)
+	for i := 0; i < n; i++ {
+		if runes[i] == ',' {
+			// Look ahead past whitespace/newlines for } or ]
+			j := i + 1
+			for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
+				j++
+			}
+			if j < n && (runes[j] == '}' || runes[j] == ']') {
+				// Skip this comma.
+				continue
+			}
+		}
+		buf.WriteRune(runes[i])
+	}
+	return buf.String()
 }
