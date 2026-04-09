@@ -1,0 +1,86 @@
+// Package cmd implements the kb-devkit CLI commands.
+package cmd
+
+import (
+	"errors"
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+// errSilent is a sentinel that suppresses double-printing in --json mode.
+// Commands that already emitted their own JSON envelope return this error
+// so Execute() knows not to print an additional error envelope.
+var errSilent = errors.New("")
+
+// Global flags accessible to all subcommands.
+var (
+	jsonMode   bool
+	configPath string
+)
+
+// SetVersionInfo is called from main.go with values injected at build time via -ldflags.
+func SetVersionInfo(version, commit, date string) {
+	rootCmd.SetVersionTemplate(fmt.Sprintf(
+		"kb-devkit %s (commit %s, built %s)\n", version, commit, date,
+	))
+	rootCmd.Version = version
+}
+
+var rootCmd = &cobra.Command{
+	Use:   "kb-devkit",
+	Short: "Workspace quality manager for Node.js and Go monorepos",
+	Long: `kb-devkit enforces standards, syncs configs, and manages builds
+across all packages in a monorepo. Declaratively configured via devkit.yaml.
+
+Commands:
+  check    [--package X] [--only scripts,deps] [--json]
+  fix      [--package X] [--dry-run] [--json]
+  status   [--json]
+  watch    [--json]
+  gate     (pre-commit: checks staged files only)
+  sync     [--check] [--dry-run] [--source X] [--json]
+  build    [--runner turbo|native|custom] [--affected] [--json]
+  generate [--type node-lib|node-cli|go-binary] [--name @scope/pkg]
+  doctor   [--json]
+  deps     [--circular] [--outdated] [--why @scope/pkg] [--json]
+  run      <script>
+
+Examples:
+  kb-devkit check --json                      machine-readable check results
+  kb-devkit check --package @kb-labs/core     check single package
+  kb-devkit sync --check                      show config drift
+  kb-devkit build --affected                  build only changed packages
+  kb-devkit status                            workspace health table
+  kb-devkit watch --json                      stream violations as JSONL`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+// Execute is the main entry point called from main.go.
+func Execute() {
+	err := rootCmd.Execute()
+	if err == nil {
+		return
+	}
+	// errSilent: command already printed its own JSON envelope.
+	if err.Error() == "" {
+		os.Exit(1)
+	}
+	if jsonMode {
+		_ = JSONOut(map[string]any{
+			"ok":   false,
+			"hint": err.Error(),
+		})
+	} else {
+		out := newOutput()
+		out.Err(err.Error())
+	}
+	os.Exit(1)
+}
+
+func init() {
+	rootCmd.PersistentFlags().BoolVar(&jsonMode, "json", false, "output as structured JSON")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to devkit.yaml (default: auto-discover)")
+}
