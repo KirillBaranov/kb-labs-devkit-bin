@@ -14,6 +14,8 @@ type PackageBuildResult struct {
 	Name    string        `json:"name"`
 	OK      bool          `json:"ok"`
 	Skipped bool          `json:"skipped"` // up-to-date (mtime cache hit)
+	Reason  string        `json:"reason,omitempty"` // why skipped
+	Layer   int           `json:"layer"`            // topological layer index
 	Elapsed time.Duration `json:"elapsed"`
 	Error   string        `json:"error,omitempty"`
 }
@@ -23,6 +25,7 @@ type BuildResult struct {
 	OK       bool                 `json:"ok"`
 	Packages []PackageBuildResult `json:"packages"`
 	Elapsed  time.Duration        `json:"elapsed"`
+	Layers   int                  `json:"layers"` // total number of topo layers
 	Hint     string               `json:"hint,omitempty"`
 }
 

@@ -47,6 +47,7 @@ Runners:
 				"ok":       result.OK,
 				"packages": result.Packages,
 				"summary":  summary,
+				"layers":   result.Layers,
 				"elapsed":  result.Elapsed.String(),
 				"hint":     result.Hint,
 			})
