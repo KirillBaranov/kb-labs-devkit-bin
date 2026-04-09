@@ -53,8 +53,8 @@ func discoverPackages(root string, cfg *config.DevkitConfig) ([]Package, error) 
 	// that are not covered by the workspace file (e.g. Go binaries not in pnpm-workspace.yaml).
 	// Only literal paths (no * or **) are considered here.
 	if cfg != nil {
-		for _, cat := range cfg.Workspace.Categories {
-			for _, pattern := range cat.Match {
+		for _, nc := range cfg.Workspace.Categories {
+			for _, pattern := range nc.Category.Match {
 				if strings.ContainsAny(pattern, "*?") {
 					continue // glob — already handled by pnpm-workspace expansion
 				}
@@ -221,20 +221,20 @@ func classifyPackages(root string, dirs []string, cfg *config.DevkitConfig) []Pa
 }
 
 // classify returns category/preset/language for a relative package path.
-// First match wins.
+// Categories are evaluated in declaration order — first match wins.
 func classify(relPath string, cfg *config.DevkitConfig) (category, preset, language string) {
-	if cfg == nil || cfg.Workspace.Categories == nil {
+	if cfg == nil || len(cfg.Workspace.Categories) == 0 {
 		return "", "", ""
 	}
 
-	for catName, cat := range cfg.Workspace.Categories {
-		for _, pattern := range cat.Match {
+	for _, nc := range cfg.Workspace.Categories {
+		for _, pattern := range nc.Category.Match {
 			if matchPattern(pattern, relPath) {
-				lang := cat.Language
+				lang := nc.Category.Language
 				if lang == "" {
-					lang = inferLanguage(cat.Preset)
+					lang = inferLanguage(nc.Category.Preset)
 				}
-				return catName, cat.Preset, lang
+				return nc.Name, nc.Category.Preset, lang
 			}
 		}
 	}

@@ -7,6 +7,35 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// yamlOrderedCategories parses the categories map preserving YAML key order.
+// yaml.v3 represents maps as sequences of key-value pairs in *yaml.Node,
+// so we can walk Content[0] (MappingNode) to extract keys in document order.
+type yamlOrderedCategories []NamedCategory
+
+func (o *yamlOrderedCategories) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		return fmt.Errorf("categories must be a mapping")
+	}
+	// MappingNode.Content = [key, value, key, value, ...]
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		keyNode := value.Content[i]
+		valNode := value.Content[i+1]
+		var cat yamlCategory
+		if err := valNode.Decode(&cat); err != nil {
+			return fmt.Errorf("category %q: %w", keyNode.Value, err)
+		}
+		*o = append(*o, NamedCategory{
+			Name: keyNode.Value,
+			Category: CategoryConfig{
+				Match:    cat.Match,
+				Language: cat.Language,
+				Preset:   cat.Preset,
+			},
+		})
+	}
+	return nil
+}
+
 func loadYAML(path string) (*DevkitConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -81,9 +110,9 @@ type yamlAffected struct {
 }
 
 type yamlWorkspace struct {
-	PackageManager string                      `yaml:"packageManager"`
-	Categories     map[string]yamlCategory     `yaml:"categories"`
-	MaxDepth       int                         `yaml:"maxDepth"`
+	PackageManager string                 `yaml:"packageManager"`
+	Categories     yamlOrderedCategories  `yaml:"categories"`
+	MaxDepth       int                    `yaml:"maxDepth"`
 }
 
 type yamlCategory struct {
@@ -190,17 +219,8 @@ func mapYAML(raw yamlConfig) *DevkitConfig {
 		},
 	}
 
-	// Categories
-	if raw.Workspace.Categories != nil {
-		cfg.Workspace.Categories = make(map[string]CategoryConfig, len(raw.Workspace.Categories))
-		for k, v := range raw.Workspace.Categories {
-			cfg.Workspace.Categories[k] = CategoryConfig{
-				Match:    v.Match,
-				Language: v.Language,
-				Preset:   v.Preset,
-			}
-		}
-	}
+	// Categories — already fully decoded by yamlOrderedCategories.UnmarshalYAML
+	cfg.Workspace.Categories = raw.Workspace.Categories
 
 	// Presets
 	if raw.Presets != nil {

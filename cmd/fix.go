@@ -42,7 +42,11 @@ Use --dry-run to preview what would be changed.`,
 				continue
 			}
 
-			preset, err := cfg.Workspace.Categories[r.Package.Category].PresetConfig(cfg)
+			cat, ok := cfg.Workspace.FindCategory(r.Package.Category)
+			if !ok {
+				continue
+			}
+			preset, err := cat.PresetConfig(cfg)
 			if err != nil {
 				continue
 			}

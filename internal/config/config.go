@@ -67,11 +67,18 @@ func (tc TaskConfig) ResolveVariant(pkgCategory string) *TaskVariant {
 
 // WorkspaceConfig describes package categories and the package manager.
 type WorkspaceConfig struct {
-	PackageManager string                     `yaml:"packageManager"`
-	Categories     map[string]CategoryConfig  `yaml:"categories"`
+	PackageManager string           `yaml:"packageManager"`
+	Categories     []NamedCategory  `yaml:"categories"`
 	// MaxDepth controls how deep to recurse when expanding ** globs.
 	// Default: 3. Increase if your monorepo has deeply nested packages.
 	MaxDepth int `yaml:"maxDepth"`
+}
+
+// NamedCategory is a category entry with its name preserved.
+// Categories are evaluated in order — first match wins.
+type NamedCategory struct {
+	Name     string
+	Category CategoryConfig
 }
 
 // CategoryConfig matches packages to a preset by glob patterns.
@@ -84,6 +91,16 @@ type CategoryConfig struct {
 // PresetConfig resolves the preset for this category from the given config.
 func (c CategoryConfig) PresetConfig(cfg *DevkitConfig) (Preset, error) {
 	return ResolvePreset(c.Preset, cfg)
+}
+
+// FindCategory returns the CategoryConfig for the given category name, or false if not found.
+func (ws *WorkspaceConfig) FindCategory(name string) (CategoryConfig, bool) {
+	for _, nc := range ws.Categories {
+		if nc.Name == name {
+			return nc.Category, true
+		}
+	}
+	return CategoryConfig{}, false
 }
 
 // ─── Presets ────────────────────────────────────────────────────────────────

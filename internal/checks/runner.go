@@ -24,8 +24,8 @@ func RunAll(ws *workspace.Workspace, cfg *config.DevkitConfig, registry *Registr
 
 	// Run circular detection once on full workspace.
 	var circularResult CircularResult
-	for _, cat := range cfg.Workspace.Categories {
-		preset, err := config.ResolvePreset(cat.Preset, cfg)
+	for _, nc := range cfg.Workspace.Categories {
+		preset, err := config.ResolvePreset(nc.Category.Preset, cfg)
 		if err == nil && preset.Deps.CheckCircular {
 			circularResult = DetectCircular(ws.Packages)
 			break

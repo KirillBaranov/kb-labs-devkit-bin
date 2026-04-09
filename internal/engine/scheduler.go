@@ -23,6 +23,11 @@ type RunOptions struct {
 	Concurrency int
 	WSRoot      string
 	CacheRoot   string // path to .kb/devkit/
+
+	// OnResult is called immediately when each (pkg, task) finishes.
+	// Called from the scheduler goroutine — must be safe to print to stdout.
+	// total is the total number of (pkg, task) nodes scheduled.
+	OnResult func(r TaskResult, done, total int)
 }
 
 // RunResult is the aggregate result of a scheduler run.
@@ -127,6 +132,8 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 		}
 	}
 
+	total := len(nodes)
+	done := 0
 	var allResults []TaskResult
 	failed := false
 
@@ -138,6 +145,10 @@ func Run(ws *workspace.Workspace, cfg *config.DevkitConfig, opts RunOptions) (Ru
 		allResults = append(allResults, layerResults...)
 
 		for _, r := range layerResults {
+			done++
+			if opts.OnResult != nil {
+				opts.OnResult(r, done, total)
+			}
 			if !r.OK && !r.Cached {
 				failed = true
 			}

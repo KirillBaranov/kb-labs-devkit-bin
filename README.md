@@ -72,6 +72,8 @@ kb-devkit run build --json
 
 Cache lives in `.kb/devkit/`. Objects are content-addressable — the same file content in two packages is stored once.
 
+Each task has its own independent cache keyed by `(taskName, package, inputHash)`. Running `build` does not populate the `lint` cache — they track different inputs and are stored separately. The only connection between tasks is `deps:` — if `lint` declares `deps: ["build"]`, build runs first (from cache if available), then lint runs fresh.
+
 **`--affected` detection:**
 
 Controlled by `affected.strategy` in `devkit.yaml`:
@@ -148,9 +150,44 @@ kb-devkit doctor --json
 
 ## Configuration (`devkit.yaml`)
 
+### Categories
+
+Categories classify packages and control which task variant runs for them. They are declared as an **ordered list** — the first matching category wins.
+
+```yaml
+workspace:
+  categories:
+    # More specific entries first — literal paths match before globs.
+    spa:
+      match:
+        - "platform/kb-labs-studio/apps/studio"   # literal path, no wildcards
+      preset: node-app
+
+    ts-app:
+      match:
+        - "platform/*/apps/**"   # glob — would also match studio, but spa is declared first
+      preset: node-app
+
+    ts-lib:
+      match:
+        - "platform/*/packages/**"
+      preset: node-lib
+
+    go-binary:
+      match:
+        - "infra/kb-labs-devkit-bin"   # literal path — Go package without package.json
+      preset: go-binary
+```
+
+**Matching rules:**
+- Categories are evaluated top-to-bottom; first match wins — declaration order matters.
+- Literal paths (no `*` or `**`) and glob patterns can be mixed freely in any order.
+- Go packages or other non-JS directories don't need `package.json` — use a literal path in `match`.
+- Packages that don't match any category are silently ignored by all commands.
+
 ### Task variants
 
-Each task can have multiple variants — selected by package category. The scheduler picks the first variant whose `categories` matches the package. Packages with no matching variant are silently skipped for that task.
+Each task can have multiple variants — selected by package category. The scheduler picks the first variant whose `categories` list includes the package's category. Packages with no matching variant are silently skipped for that task.
 
 ```yaml
 tasks:

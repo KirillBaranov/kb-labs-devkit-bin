@@ -79,6 +79,15 @@ Examples:
 			CacheRoot:   cacheRoot,
 		}
 
+		o := newOutput()
+
+		if !jsonMode {
+			fmt.Println()
+			opts.OnResult = func(r engine.TaskResult, done, total int) {
+				printTaskResult(o, r, done, total)
+			}
+		}
+
 		start := time.Now()
 		result, err := engine.Run(ws, cfg, opts)
 		elapsed := time.Since(start)
@@ -99,51 +108,7 @@ Examples:
 			return errSilent
 		}
 
-		// Human output.
-		o := newOutput()
-		fmt.Println()
-
-		for _, r := range result.Results {
-			icon := o.StatusIcon("healthy")
-			detail := ""
-
-			switch {
-			case r.Cached:
-				icon = o.dim.Render("-")
-				detail = o.dim.Render("cached")
-			case r.OK:
-				detail = o.dim.Render(r.Elapsed.Round(time.Millisecond).String())
-			default:
-				icon = o.StatusIcon("error")
-				detail = o.errStyle.Render("FAILED")
-			}
-
-			fmt.Printf("  %s %-40s  %-14s  %s\n",
-				icon,
-				r.Package,
-				o.dim.Render("["+r.Task+"]"),
-				detail,
-			)
-
-			if !r.OK && !r.Cached {
-				output := r.Stderr
-				if output == "" {
-					output = r.Stdout
-				}
-				lines := strings.SplitN(strings.TrimSpace(output), "\n", 12)
-				limit := 10
-				if len(lines) < limit {
-					limit = len(lines)
-				}
-				for _, line := range lines[:limit] {
-					fmt.Printf("       %s\n", o.dim.Render(line))
-				}
-				if len(lines) > 10 {
-					fmt.Printf("       %s\n", o.dim.Render("... (truncated)"))
-				}
-			}
-		}
-
+		// Summary line.
 		s := result.Summary()
 		fmt.Printf("\n  %s  %s  %s  — %s\n\n",
 			o.healthy.Render(fmt.Sprintf("%d passed", s.Passed)),
@@ -173,4 +138,56 @@ func colorCount(n int, o output) string {
 		return o.dim.Render("0 failed")
 	}
 	return o.errStyle.Render(fmt.Sprintf("%d failed", n))
+}
+
+func printTaskResult(o output, r engine.TaskResult, done, total int) {
+	counter := o.dim.Render(fmt.Sprintf("[%3d/%-3d]", done, total))
+	ts := o.dim.Render(time.Now().Format("15:04:05"))
+
+	var icon, status string
+	switch {
+	case r.Cached:
+		icon = o.dim.Render("-")
+		status = o.dim.Render("cached")
+	case r.OK:
+		icon = o.StatusIcon("healthy")
+		status = o.dim.Render(r.Elapsed.Round(time.Millisecond).String())
+	default:
+		icon = o.StatusIcon("error")
+		status = o.errStyle.Render("FAILED")
+	}
+
+	// Truncate long package names.
+	name := r.Package
+	if len(name) > 42 {
+		name = "…" + name[len(name)-41:]
+	}
+
+	fmt.Printf("  %s %s %s %-42s  %-12s  %s\n",
+		ts,
+		counter,
+		icon,
+		name,
+		o.dim.Render("["+r.Task+"]"),
+		status,
+	)
+
+	// Print error output inline.
+	if !r.OK && !r.Cached {
+		out := r.Stderr
+		if out == "" {
+			out = r.Stdout
+		}
+		lines := strings.SplitN(strings.TrimSpace(out), "\n", 12)
+		limit := 10
+		if len(lines) < limit {
+			limit = len(lines)
+		}
+		for _, line := range lines[:limit] {
+			fmt.Printf("           %s\n", o.dim.Render(line))
+		}
+		if len(lines) > 10 {
+			fmt.Printf("           %s\n", o.dim.Render("... (truncated)"))
+		}
+	}
 }
