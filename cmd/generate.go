@@ -26,7 +26,7 @@ Types:
 			return fmt.Errorf("--type is required (node-lib, node-cli, go-binary)")
 		}
 		if generateName == "" {
-			return fmt.Errorf("--name is required (e.g. @kb-labs/my-package)")
+			return fmt.Errorf("--name is required (e.g. @acme/my-package)")
 		}
 
 		// TODO: implement //go:embed templates + generator
@@ -54,7 +54,7 @@ Types:
 
 func init() {
 	generateCmd.Flags().StringVar(&generateType, "type", "", "preset type: node-lib, node-cli, go-binary")
-	generateCmd.Flags().StringVar(&generateName, "name", "", "package name (e.g. @kb-labs/my-package)")
+	generateCmd.Flags().StringVar(&generateName, "name", "", "package name (e.g. @acme/my-package)")
 	generateCmd.Flags().BoolVar(&generateDry, "dry-run", false, "preview files without creating")
 	rootCmd.AddCommand(generateCmd)
 }

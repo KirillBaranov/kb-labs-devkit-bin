@@ -9,15 +9,13 @@ import (
 	"github.com/kb-labs/devkit/internal/workspace"
 )
 
-var reESLintDevkitPreset = regexp.MustCompile(`from\s+['"]@kb-labs/devkit`)
-
 // ESLintRule checks that eslint.config.js uses the devkit preset.
 type ESLintRule struct{}
 
 func (r *ESLintRule) Name() string { return "eslint" }
 
 func (r *ESLintRule) Check(pkg workspace.Package, preset config.Preset) []Issue {
-	if !preset.ESLint.MustUseDevkitPreset {
+	if !preset.ESLint.MustUsePreset && preset.ESLint.MustImportPattern == "" {
 		return nil
 	}
 
@@ -41,17 +39,21 @@ func (r *ESLintRule) Check(pkg workspace.Package, preset config.Preset) []Issue 
 			Severity: SeverityError,
 			Message:  "no eslint config found",
 			File:     filepath.Join(pkg.Dir, "eslint.config.js"),
-			Fix:      "create eslint.config.js using the @kb-labs/devkit preset",
+			Fix:      "create eslint.config.js using the configured preset",
 		}}
 	}
 
-	if !reESLintDevkitPreset.Match(content) {
+	pattern := preset.ESLint.MustImportPattern
+	if pattern == "" {
+		pattern = "@kb-labs/devkit"
+	}
+	if !regexp.MustCompile(regexp.QuoteMeta(pattern)).Match(content) {
 		return []Issue{{
 			Check:    r.Name(),
 			Severity: SeverityError,
-			Message:  "eslint config does not import from @kb-labs/devkit",
+			Message:  "eslint config does not import the expected preset",
 			File:     configPath,
-			Fix:      "import and use the devkit eslint preset",
+			Fix:      "import and use the configured eslint preset",
 		}}
 	}
 

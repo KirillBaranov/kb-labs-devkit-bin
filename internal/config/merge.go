@@ -3,7 +3,7 @@ package config
 import "fmt"
 
 // ResolvePreset resolves a preset by name, following extends: chains with DFS.
-// cfg.Presets (user-defined) takes priority over defaultPresets.
+// cfg.Presets is the single source of truth after config/pack loading.
 // Returns error on cycles or unknown preset names.
 func ResolvePreset(name string, cfg *DevkitConfig) (Preset, error) {
 	visited := make(map[string]bool)
@@ -16,17 +16,16 @@ func resolvePreset(name string, cfg *DevkitConfig, visited map[string]bool) (Pre
 	}
 	visited[name] = true
 
-	// User-defined presets win over built-ins.
 	var current Preset
 	if cfg.Presets != nil {
 		if p, ok := cfg.Presets[name]; ok {
 			current = p
-		} else if p, ok := defaultPresets[name]; ok {
+		} else if p, ok := GetDefaultPreset(name); ok {
 			current = p
 		} else {
 			return Preset{}, fmt.Errorf("unknown preset %q", name)
 		}
-	} else if p, ok := defaultPresets[name]; ok {
+	} else if p, ok := GetDefaultPreset(name); ok {
 		current = p
 	} else {
 		return Preset{}, fmt.Errorf("unknown preset %q", name)
@@ -85,8 +84,8 @@ func mergePresets(base, child Preset) Preset {
 	}
 
 	// TSup
-	if child.TSup.MustUseDevkitPreset {
-		result.TSup.MustUseDevkitPreset = true
+	if child.TSup.MustUsePreset {
+		result.TSup.MustUsePreset = true
 	}
 	if child.TSup.DTSRequired {
 		result.TSup.DTSRequired = true
@@ -97,10 +96,16 @@ func mergePresets(base, child Preset) Preset {
 	if child.TSup.PresetPattern != "" {
 		result.TSup.PresetPattern = child.TSup.PresetPattern
 	}
+	if child.TSup.MustImportPattern != "" {
+		result.TSup.MustImportPattern = child.TSup.MustImportPattern
+	}
 
 	// ESLint
-	if child.ESLint.MustUseDevkitPreset {
-		result.ESLint.MustUseDevkitPreset = true
+	if child.ESLint.MustUsePreset {
+		result.ESLint.MustUsePreset = true
+	}
+	if child.ESLint.MustImportPattern != "" {
+		result.ESLint.MustImportPattern = child.ESLint.MustImportPattern
 	}
 
 	// Structure

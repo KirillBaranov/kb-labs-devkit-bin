@@ -23,7 +23,7 @@ In --json mode, emits JSONL events (one JSON object per line) for agent consumpt
 			return err
 		}
 
-		registry := checks.Default()
+		registry := checks.Build(cfg, ws.Root, "check")
 
 		w, err := watcher.New(ws)
 		if err != nil {

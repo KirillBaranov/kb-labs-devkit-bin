@@ -37,7 +37,10 @@ var doctorCmd = &cobra.Command{
 				"checks": checks,
 				"hint":   hint,
 			})
-			return errSilent
+			if !ok {
+				return errSilent
+			}
+			return nil
 		}
 
 		o := newOutput()

@@ -12,12 +12,22 @@ import (
 // initTemplate is built via concatenation to avoid a raw backtick inside a
 // Go raw string literal (which cannot contain a backtick character).
 var initTemplate = strings.Join([]string{
-	"version: 1",
+	"schemaVersion: 2",
+	"extends: [builtin:generic]",
 	"",
 	"# ── Workspace ─────────────────────────────────────────────────────────────────",
 	"workspace:",
 	"  packageManager: pnpm   # pnpm | npm | yarn",
-	"  # maxDepth: 3          # how deep to scan for packages (default: 5)",
+	"  # discovery: [\"packages/**\", \"apps/**\"]",
+	"  # maxDepth: 3          # how deep to scan for ** globs (default: 3)",
+	"",
+	"# categories:",
+	"#   lib:",
+	"#     match: [\"packages/**\"]",
+	"#     preset: node-lib",
+	"#   app:",
+	"#     match: [\"apps/**\"]",
+	"#     preset: node-app",
 	"",
 	"# ── Tasks ─────────────────────────────────────────────────────────────────────",
 	"# Define tasks once; kb-devkit runs them across all packages in dep order.",
@@ -66,22 +76,34 @@ var initTemplate = strings.Join([]string{
 	"#   #   command    — runs a custom script, reads file paths from stdout",
 	"#   # command: ./scripts/changed-files.sh",
 	"",
-	"# ── Quality presets ───────────────────────────────────────────────────────────",
-	"# Presets define rules checked by `kb-devkit check`.",
-	"# Packages matched by workspace.categories inherit their preset rules.",
+	"# ── Packs and extensions ─────────────────────────────────────────────────────",
+	"# Compose policy from built-in, local, or package-provided YAML packs.",
 	"#",
-	"# presets:",
-	"#   node-lib:",
+	"# extends:",
+	"#   - builtin:generic",
+	"#   - ./devkit/packs/frontend.yaml",
+	"#   - package:@acme/devkit-pack#devkit.pack.yaml",
+	"",
+	"# ── Optional policy overrides ─────────────────────────────────────────────────",
+	"# checks:",
+	"#   packages:",
+	"#     generic:",
+	"#       enabled: true",
+	"#       # config:",
+	"#       #   requiredFile: README.md",
+	"#",
+	"# custom_checks:",
+	"#   - name: external-readme",
+	"#     run: ./node_modules/@acme/devkit-pack/bin/external-readme.sh",
+	"#     fix: ./node_modules/@acme/devkit-pack/bin/external-readme.sh",
+	"#     on: [check]",
 	"#     language: typescript",
-	"#     package_json:",
-	"#       required_scripts: [build, dev, test, lint, type-check, clean]",
-	"#       required_fields:  [name, version, type, engines, exports]",
-	"#     tsconfig:",
-	`#       must_extend_pattern: "@kb-labs/devkit/tsconfig/"`,
-	"#     eslint:",
-	"#       must_use_devkit_preset: true",
-	"#     structure:",
-	`#       required_files: ["src/index.ts", "README.md"]`,
+	"#",
+	"# fix:",
+	"#   defaultMode: safe",
+	"#",
+	"# reporting:",
+	"#   verbose: false",
 	"",
 }, "\n")
 
@@ -90,8 +112,9 @@ var initForce bool
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a starter devkit.yaml in the current directory",
-	Long: `Writes a devkit.yaml with all sections commented out as examples.
-Uncomment and adjust the tasks you need — then run kb-devkit run build.
+	Long: `Writes a compact devkit.yaml starter config.
+Add categories/tasks you need, optionally extend it with YAML packs, then run
+kb-devkit check or kb-devkit run build.
 
 If devkit.yaml already exists, the command exits with an error unless --force is passed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -115,10 +138,10 @@ If devkit.yaml already exists, the command exits with an error unless --force is
 		o := newOutput()
 		o.OK("Created devkit.yaml")
 		fmt.Println()
-		fmt.Println("  Uncomment the tasks you need, then:")
+		fmt.Println("  Add categories, tasks, or packs, then:")
 		fmt.Println()
 		fmt.Printf("  %s\n", o.dim.Render("kb-devkit run build"))
-		fmt.Printf("  %s\n", o.dim.Render("kb-devkit run build lint test --affected"))
+		fmt.Printf("  %s\n", o.dim.Render("kb-devkit check"))
 		fmt.Println()
 		return nil
 	},

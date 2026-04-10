@@ -27,6 +27,34 @@ func Default() *Registry {
 	return r
 }
 
+// Build returns a Registry with built-in rules plus external command-backed
+// checks declared in config.Custom for the given phase.
+func Build(cfg *config.DevkitConfig, workspaceRoot, phase string) *Registry {
+	r := Default()
+	if cfg == nil {
+		return r
+	}
+	for _, c := range cfg.Custom {
+		if !matchesPhase(c, phase) {
+			continue
+		}
+		packCfg, ok := cfg.Checks.Packages[c.Name]
+		if ok && !packCfg.Enabled {
+			continue
+		}
+		r.Register(&externalRule{
+			name:          c.Name,
+			run:           c.Run,
+			fix:           c.Fix,
+			phase:         phase,
+			language:      c.Language,
+			workspaceRoot: workspaceRoot,
+			checkConfig:   packCfg,
+		})
+	}
+	return r
+}
+
 // Register adds a custom rule to the registry.
 func (r *Registry) Register(rule Rule) {
 	r.rules = append(r.rules, rule)
@@ -34,18 +62,23 @@ func (r *Registry) Register(rule Rule) {
 
 // RulesFor returns rules applicable to a given preset's language.
 func (r *Registry) RulesFor(preset config.Preset) []Rule {
-	if preset.Language == "go" {
-		// Go packages: only structure rule applies (+ go-specific in future)
-		var result []Rule
-		for _, rule := range r.rules {
+	var result []Rule
+	for _, rule := range r.rules {
+		if external, ok := rule.(*externalRule); ok {
+			if matchesLanguage(config.CustomCheck{Language: external.language}, preset.Language) {
+				result = append(result, rule)
+			}
+			continue
+		}
+		if preset.Language == "go" {
 			if rule.Name() == "structure" {
 				result = append(result, rule)
 			}
+			continue
 		}
-		return result
+		result = append(result, rule)
 	}
-	// TypeScript packages: all rules.
-	return r.rules
+	return result
 }
 
 // All returns all registered rules.

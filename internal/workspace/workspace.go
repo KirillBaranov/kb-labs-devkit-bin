@@ -10,7 +10,7 @@ import (
 
 // Package represents a single package in the monorepo.
 type Package struct {
-	Name     string // @kb-labs/core-runtime
+	Name     string // @acme/core-runtime
 	Dir      string // absolute path
 	Category string // ts-lib, go-binary, site, ...
 	Preset   string // node-lib, go-binary, ...

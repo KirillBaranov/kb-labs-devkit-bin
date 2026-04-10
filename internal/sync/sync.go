@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/kb-labs/devkit/internal/config"
@@ -20,6 +21,16 @@ type SyncResult struct {
 	Updated []string
 	Skipped []string // matched exclude rules
 	Drifted []string // different from source (--check mode)
+	Entries []SyncEntry
+}
+
+type SyncEntry struct {
+	Status   string `json:"status"`
+	Target   string `json:"target"`
+	DestRoot string `json:"destRoot"`
+	Path     string `json:"path"`
+	Mode     string `json:"mode,omitempty"`
+	Signal   string `json:"signal,omitempty"`
 }
 
 // Syncer orchestrates sync operations across the workspace.
@@ -91,6 +102,7 @@ func (s *Syncer) Run(opts Options) (SyncResult, error) {
 			result.Updated = append(result.Updated, r.Updated...)
 			result.Skipped = append(result.Skipped, r.Skipped...)
 			result.Drifted = append(result.Drifted, r.Drifted...)
+			result.Entries = append(result.Entries, r.Entries...)
 		}
 	}
 
@@ -102,7 +114,7 @@ func (s *Syncer) applyTarget(srcFS fs.FS, target config.SyncTarget, destRoot str
 	var result SyncResult
 
 	// Walk source FS from target.From.
-	from := target.From
+	from := normalizeSyncPath(target.From)
 	err := fs.WalkDir(srcFS, from, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -121,6 +133,7 @@ func (s *Syncer) applyTarget(srcFS fs.FS, target config.SyncTarget, destRoot str
 			matched, _ := doublestar.Match(pattern, filepath.Join(target.To, rel))
 			if matched {
 				result.Skipped = append(result.Skipped, destPath)
+				result.Entries = append(result.Entries, newSyncEntry("skipped", target, destRoot, destPath))
 				return nil
 			}
 		}
@@ -135,6 +148,7 @@ func (s *Syncer) applyTarget(srcFS fs.FS, target config.SyncTarget, destRoot str
 			destContent, err := os.ReadFile(destPath)
 			if err != nil || sha256sum(srcContent) != sha256sum(destContent) {
 				result.Drifted = append(result.Drifted, destPath)
+				result.Entries = append(result.Entries, newSyncEntry("drifted", target, destRoot, destPath))
 			}
 			return nil
 		}
@@ -142,8 +156,10 @@ func (s *Syncer) applyTarget(srcFS fs.FS, target config.SyncTarget, destRoot str
 		if opts.DryRun {
 			if _, err := os.Stat(destPath); os.IsNotExist(err) {
 				result.Created = append(result.Created, destPath)
+				result.Entries = append(result.Entries, newSyncEntry("created", target, destRoot, destPath))
 			} else {
 				result.Updated = append(result.Updated, destPath)
+				result.Entries = append(result.Entries, newSyncEntry("updated", target, destRoot, destPath))
 			}
 			return nil
 		}
@@ -163,13 +179,39 @@ func (s *Syncer) applyTarget(srcFS fs.FS, target config.SyncTarget, destRoot str
 
 		if existed {
 			result.Updated = append(result.Updated, destPath)
+			result.Entries = append(result.Entries, newSyncEntry("updated", target, destRoot, destPath))
 		} else {
 			result.Created = append(result.Created, destPath)
+			result.Entries = append(result.Entries, newSyncEntry("created", target, destRoot, destPath))
 		}
 		return nil
 	})
 
 	return result, err
+}
+
+func normalizeSyncPath(path string) string {
+	path = filepath.ToSlash(filepath.Clean(path))
+	path = strings.TrimPrefix(path, "./")
+	if path == "." {
+		return ""
+	}
+	return path
+}
+
+func newSyncEntry(status string, target config.SyncTarget, destRoot, path string) SyncEntry {
+	targetName := filepath.ToSlash(target.To)
+	if targetName == "." || targetName == "/" || targetName == "" {
+		targetName = target.To
+	}
+	return SyncEntry{
+		Status:   status,
+		Target:   targetName,
+		DestRoot: destRoot,
+		Path:     path,
+		Mode:     target.Mode,
+		Signal:   target.Signal,
+	}
 }
 
 func sha256sum(data []byte) string {

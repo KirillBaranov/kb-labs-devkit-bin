@@ -8,22 +8,29 @@ import (
 
 // Severity indicates how critical an issue is.
 type Severity string
+type Capability string
 
 const (
 	SeverityError   Severity = "error"
 	SeverityWarning Severity = "warning"
 	SeverityInfo    Severity = "info"
+
+	CapabilityManual        Capability = "manual"
+	CapabilityFixable       Capability = "fixable"
+	CapabilityScaffoldable  Capability = "scaffoldable"
+	CapabilityManagedBySync Capability = "managed-by-sync"
 )
 
 // Issue is a single finding from a rule check.
 type Issue struct {
-	Check    string   `json:"check"`
-	Severity Severity `json:"severity"`
-	Message  string   `json:"message"`
-	File     string   `json:"file,omitempty"`
-	Line     int      `json:"line,omitempty"`
-	Fix      string   `json:"fix,omitempty"`
-	AutoFix  bool     `json:"autoFix,omitempty"`
+	Check      string     `json:"check"`
+	Severity   Severity   `json:"severity"`
+	Message    string     `json:"message"`
+	File       string     `json:"file,omitempty"`
+	Line       int        `json:"line,omitempty"`
+	Fix        string     `json:"fix,omitempty"`
+	AutoFix    bool       `json:"autoFix,omitempty"`
+	Capability Capability `json:"capability,omitempty"`
 }
 
 // Rule is the interface every checker must implement.

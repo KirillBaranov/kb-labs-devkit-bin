@@ -32,7 +32,7 @@ Examples:
   kb-devkit run build
   kb-devkit run build lint
   kb-devkit run build lint test --affected
-  kb-devkit run build --packages @kb-labs/core-types,@kb-labs/core-runtime
+  kb-devkit run build --packages @acme/core-types,@acme/core-runtime
   kb-devkit run build --no-cache
   kb-devkit run deploy`,
 	Args: cobra.MinimumNArgs(1),
@@ -105,7 +105,7 @@ Examples:
 			if !result.OK {
 				return errSilent
 			}
-			return errSilent
+			return nil
 		}
 
 		// Summary line.

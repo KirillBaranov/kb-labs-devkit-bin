@@ -17,7 +17,7 @@ var statusCmd = &cobra.Command{
 			return err
 		}
 
-		registry := checks.Default()
+		registry := checks.Build(cfg, ws.Root, "check")
 		results := checks.RunAll(ws, cfg, registry, nil)
 
 		if jsonMode {
@@ -45,10 +45,10 @@ type statusEntry struct {
 }
 
 type statusSummary struct {
-	Healthy  int `json:"healthy"`
-	Warning  int `json:"warning"`
-	Error    int `json:"error"`
-	Total    int `json:"total"`
+	Healthy int `json:"healthy"`
+	Warning int `json:"warning"`
+	Error   int `json:"error"`
+	Total   int `json:"total"`
 }
 
 func outputStatusJSON(results map[string]checks.PackageResult) error {
@@ -87,7 +87,10 @@ func outputStatusJSON(results map[string]checks.PackageResult) error {
 	}
 
 	_ = JSONOut(out)
-	return errSilent
+	if !out.OK {
+		return errSilent
+	}
+	return nil
 }
 
 func outputStatusHuman(results map[string]checks.PackageResult) error {

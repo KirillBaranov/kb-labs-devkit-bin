@@ -21,14 +21,17 @@ coverage metrics, and tech debt summary.`,
 			return err
 		}
 
-		registry := checks.Default()
+		registry := checks.Build(cfg, ws.Root, "check")
 		results := checks.RunAll(ws, cfg, registry, nil)
 
 		s := computeStats(results)
 
 		if jsonMode {
 			_ = JSONOut(s)
-			return errSilent
+			if !s.OK {
+				return errSilent
+			}
+			return nil
 		}
 
 		printStats(s)

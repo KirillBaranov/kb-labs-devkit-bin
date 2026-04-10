@@ -69,8 +69,8 @@ func (ms *ManifestStore) Put(pkg, task string, m *Manifest) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// pkgSlug converts a package name like "@kb-labs/core-types" to a
-// filesystem-safe string "kb-labs__core-types".
+// pkgSlug converts a package name like "@acme/core-types" to a
+// filesystem-safe string "acme__core-types".
 func pkgSlug(name string) string {
 	name = strings.TrimPrefix(name, "@")
 	name = strings.ReplaceAll(name, "/", "__")

@@ -70,10 +70,11 @@ func (r *PackageJSONRule) Check(pkg workspace.Package, preset config.Preset) []I
 	for _, field := range rules.RequiredFields {
 		if _, ok := raw[field]; !ok {
 			issues = append(issues, Issue{
-				Check:    r.Name(),
-				Severity: SeverityError,
-				Message:  fmt.Sprintf(`missing required field %q`, field),
-				File:     path,
+				Check:      r.Name(),
+				Severity:   SeverityError,
+				Message:    fmt.Sprintf(`missing required field %q`, field),
+				File:       path,
+				Capability: CapabilityFixable,
 			})
 		}
 	}
@@ -86,11 +87,12 @@ func (r *PackageJSONRule) Check(pkg workspace.Package, preset config.Preset) []I
 		}
 		if pkgType != rules.Type {
 			issues = append(issues, Issue{
-				Check:    r.Name(),
-				Severity: SeverityError,
-				Message:  fmt.Sprintf(`"type" must be %q, got %q`, rules.Type, pkgType),
-				File:     path,
-				Fix:      fmt.Sprintf(`add "type": "%s" to package.json`, rules.Type),
+				Check:      r.Name(),
+				Severity:   SeverityError,
+				Message:    fmt.Sprintf(`"type" must be %q, got %q`, rules.Type, pkgType),
+				File:       path,
+				Fix:        fmt.Sprintf(`add "type": "%s" to package.json`, rules.Type),
+				Capability: CapabilityFixable,
 			})
 		}
 	}
@@ -103,11 +105,12 @@ func (r *PackageJSONRule) Check(pkg workspace.Package, preset config.Preset) []I
 	for _, script := range rules.RequiredScripts {
 		if _, ok := scripts[script]; !ok {
 			issues = append(issues, Issue{
-				Check:    r.Name(),
-				Severity: SeverityError,
-				Message:  fmt.Sprintf("missing required script %q", script),
-				File:     path,
-				Fix:      fmt.Sprintf(`add script "%s" to package.json`, script),
+				Check:      r.Name(),
+				Severity:   SeverityError,
+				Message:    fmt.Sprintf("missing required script %q", script),
+				File:       path,
+				Fix:        fmt.Sprintf(`add script "%s" to package.json`, script),
+				Capability: CapabilityFixable,
 			})
 		}
 	}
@@ -129,11 +132,12 @@ func (r *PackageJSONRule) Check(pkg workspace.Package, preset config.Preset) []I
 		}
 		if !ok {
 			issues = append(issues, Issue{
-				Check:    r.Name(),
-				Severity: SeverityError,
-				Message:  fmt.Sprintf("missing required devDependency %q", dep),
-				File:     path,
-				Fix:      fmt.Sprintf(`add "%s": "%s" to devDependencies`, dep, wantVer),
+				Check:      r.Name(),
+				Severity:   SeverityError,
+				Message:    fmt.Sprintf("missing required devDependency %q", dep),
+				File:       path,
+				Fix:        fmt.Sprintf(`add "%s": "%s" to devDependencies`, dep, wantVer),
+				Capability: CapabilityFixable,
 			})
 			continue
 		}
@@ -158,14 +162,122 @@ func (r *PackageJSONRule) Check(pkg workspace.Package, preset config.Preset) []I
 	for eng, wantVer := range rules.Engines {
 		if _, ok := engines[eng]; !ok {
 			issues = append(issues, Issue{
-				Check:    r.Name(),
-				Severity: SeverityError,
-				Message:  fmt.Sprintf("missing required engine %q: %q in engines field", eng, wantVer),
-				File:     path,
-				Fix:      fmt.Sprintf(`add "%s": "%s" to engines`, eng, wantVer),
+				Check:      r.Name(),
+				Severity:   SeverityError,
+				Message:    fmt.Sprintf("missing required engine %q: %q in engines field", eng, wantVer),
+				File:       path,
+				Fix:        fmt.Sprintf(`add "%s": "%s" to engines`, eng, wantVer),
+				Capability: CapabilityFixable,
 			})
 		}
 	}
 
 	return issues
+}
+
+func (r *PackageJSONRule) Apply(pkg workspace.Package, issues []Issue, dryRun bool) error {
+	path := filepath.Join(pkg.Dir, "package.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	scripts, _ := raw["scripts"].(map[string]any)
+	if scripts == nil {
+		scripts = map[string]any{}
+	}
+	devDeps, _ := raw["devDependencies"].(map[string]any)
+	if devDeps == nil {
+		devDeps = map[string]any{}
+	}
+	engines, _ := raw["engines"].(map[string]any)
+	if engines == nil {
+		engines = map[string]any{}
+	}
+
+	for _, issue := range issues {
+		if issue.Capability != CapabilityFixable && !issue.AutoFix {
+			continue
+		}
+		msg := issue.Message
+		switch {
+		case strings.HasPrefix(msg, `missing required field "`):
+			field := strings.TrimSuffix(strings.TrimPrefix(msg, `missing required field "`), `"`)
+			switch field {
+			case "type":
+				raw["type"] = "module"
+			case "name":
+				if pkg.Name != "" {
+					raw["name"] = pkg.Name
+				}
+			case "version":
+				raw["version"] = "0.0.0"
+			case "engines":
+				raw["engines"] = engines
+			}
+		case strings.HasPrefix(msg, `"type" must be `):
+			raw["type"] = "module"
+		case strings.HasPrefix(msg, "missing required script "):
+			script := strings.Trim(msg[len("missing required script "):], `"`)
+			scripts[script] = inferScriptCommand(script)
+			raw["scripts"] = scripts
+		case strings.HasPrefix(msg, "missing required devDependency "):
+			dep := strings.Trim(msg[len("missing required devDependency "):], `"`)
+			devDeps[dep] = inferDevDependencyVersion(dep)
+			raw["devDependencies"] = devDeps
+		case strings.HasPrefix(msg, "missing required engine "):
+			parts := strings.Split(msg, `"`)
+			if len(parts) >= 4 {
+				engines[parts[1]] = parts[3]
+				raw["engines"] = engines
+			}
+		}
+	}
+
+	if dryRun {
+		return nil
+	}
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	return os.WriteFile(path, out, 0o644)
+}
+
+func inferScriptCommand(name string) string {
+	switch name {
+	case "build":
+		return "echo 'todo: build'"
+	case "test":
+		return "echo 'todo: test'"
+	case "lint":
+		return "echo 'todo: lint'"
+	case "type-check":
+		return "echo 'todo: type-check'"
+	case "dev":
+		return "echo 'todo: dev'"
+	case "clean":
+		return "echo 'todo: clean'"
+	default:
+		return "echo 'todo'"
+	}
+}
+
+func inferDevDependencyVersion(name string) string {
+	switch name {
+	case "typescript":
+		return "^5"
+	case "tsup":
+		return "^8"
+	case "vitest":
+		return "^3"
+	default:
+		return "*"
+	}
 }

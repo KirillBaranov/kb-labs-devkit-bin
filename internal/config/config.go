@@ -3,14 +3,20 @@ package config
 
 // DevkitConfig is the top-level structure for devkit.yaml.
 type DevkitConfig struct {
-	Version   int                        `yaml:"version"`
-	Workspace WorkspaceConfig            `yaml:"workspace"`
-	Sync      SyncConfig                 `yaml:"sync"`
-	Run       RunConfig                  `yaml:"run"`
-	Tasks     map[string]TaskConfig      `yaml:"tasks"`
-	Affected  AffectedConfig             `yaml:"affected"`
-	Presets   map[string]Preset          `yaml:"presets"`
-	Custom    []CustomCheck              `yaml:"custom_checks"`
+	SchemaVersion int                   `yaml:"schemaVersion"`
+	Version       int                   `yaml:"version"`
+	Extends       []string              `yaml:"extends"`
+	Workspace     WorkspaceConfig       `yaml:"workspace"`
+	Categories    []NamedCategory       `yaml:"categories"`
+	Sync          SyncConfig            `yaml:"sync"`
+	Run           RunConfig             `yaml:"run"`
+	Tasks         map[string]TaskConfig `yaml:"tasks"`
+	Affected      AffectedConfig        `yaml:"affected"`
+	Presets       map[string]Preset     `yaml:"presets"`
+	Checks        ChecksConfig          `yaml:"checks"`
+	Fix           FixConfig             `yaml:"fix"`
+	Reporting     ReportingConfig       `yaml:"reporting"`
+	Custom        []CustomCheck         `yaml:"custom_checks"`
 }
 
 // AffectedConfig controls how changed packages are detected.
@@ -67,8 +73,9 @@ func (tc TaskConfig) ResolveVariant(pkgCategory string) *TaskVariant {
 
 // WorkspaceConfig describes package categories and the package manager.
 type WorkspaceConfig struct {
-	PackageManager string           `yaml:"packageManager"`
-	Categories     []NamedCategory  `yaml:"categories"`
+	PackageManager string          `yaml:"packageManager"`
+	Discovery      []string        `yaml:"discovery"`
+	Categories     []NamedCategory `yaml:"categories"`
 	// MaxDepth controls how deep to recurse when expanding ** globs.
 	// Default: 3. Increase if your monorepo has deeply nested packages.
 	MaxDepth int `yaml:"maxDepth"`
@@ -120,11 +127,11 @@ type Preset struct {
 
 // PackageJSONRules defines requirements for package.json.
 type PackageJSONRules struct {
-	RequiredScripts  []string          `yaml:"required_scripts"`
-	RequiredDevDeps  map[string]string `yaml:"required_dev_deps"`
-	RequiredFields   []string          `yaml:"required_fields"`
-	Type             string            `yaml:"type"`
-	Engines          map[string]string `yaml:"engines"`
+	RequiredScripts []string          `yaml:"required_scripts"`
+	RequiredDevDeps map[string]string `yaml:"required_dev_deps"`
+	RequiredFields  []string          `yaml:"required_fields"`
+	Type            string            `yaml:"type"`
+	Engines         map[string]string `yaml:"engines"`
 }
 
 // TSConfigRules defines requirements for tsconfig.json.
@@ -135,15 +142,17 @@ type TSConfigRules struct {
 
 // TSupRules defines requirements for tsup.config.ts.
 type TSupRules struct {
-	MustUseDevkitPreset  bool   `yaml:"must_use_devkit_preset"`
-	DTSRequired          bool   `yaml:"dts_required"`
-	TSConfigMustBeBuild  bool   `yaml:"tsconfig_must_be_build"`
-	PresetPattern        string `yaml:"preset_pattern"`
+	MustUsePreset       bool   `yaml:"must_use_preset"`
+	DTSRequired         bool   `yaml:"dts_required"`
+	TSConfigMustBeBuild bool   `yaml:"tsconfig_must_be_build"`
+	PresetPattern       string `yaml:"preset_pattern"`
+	MustImportPattern   string `yaml:"must_import_pattern"`
 }
 
 // ESLintRules defines requirements for eslint.config.js.
 type ESLintRules struct {
-	MustUseDevkitPreset bool `yaml:"must_use_devkit_preset"`
+	MustUsePreset     bool   `yaml:"must_use_preset"`
+	MustImportPattern string `yaml:"must_import_pattern"`
 }
 
 // StructureRules defines required files that must exist.
@@ -153,9 +162,9 @@ type StructureRules struct {
 
 // DepsRules defines dependency analysis rules.
 type DepsRules struct {
-	CheckLinks           bool `yaml:"check_links"`
-	CheckUnused          bool `yaml:"check_unused"`
-	CheckCircular        bool `yaml:"check_circular"`
+	CheckLinks              bool `yaml:"check_links"`
+	CheckUnused             bool `yaml:"check_unused"`
+	CheckCircular           bool `yaml:"check_circular"`
 	CheckVersionConsistency bool `yaml:"check_version_consistency"`
 }
 
@@ -187,6 +196,8 @@ type SyncTarget struct {
 	Source string `yaml:"source"` // key from Sources
 	From   string `yaml:"from"`   // path within source FS
 	To     string `yaml:"to"`     // destination path relative to submodule root
+	Mode   string `yaml:"mode"`   // managed | merge-managed | verify-only
+	Signal string `yaml:"signal"` // normal | low
 }
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
@@ -204,6 +215,24 @@ type RunConfig struct {
 type CustomCheck struct {
 	Name     string   `yaml:"name"`
 	Run      string   `yaml:"run"`
+	Fix      string   `yaml:"fix"`
 	On       []string `yaml:"on"`       // check | gate
 	Language string   `yaml:"language"` // any | typescript | go
+}
+
+type ChecksConfig struct {
+	Packages map[string]CheckPackConfig `yaml:"packages"`
+}
+
+type CheckPackConfig struct {
+	Enabled bool           `yaml:"enabled"`
+	Config  map[string]any `yaml:"config"`
+}
+
+type FixConfig struct {
+	DefaultMode string `yaml:"defaultMode"`
+}
+
+type ReportingConfig struct {
+	Verbose bool `yaml:"verbose"`
 }

@@ -22,11 +22,17 @@ const defaultMaxDepth = 3
 //
 // Recursion depth for ** is controlled by cfg.Workspace.MaxDepth (default 3).
 func discoverPackages(root string, cfg *config.DevkitConfig) ([]Package, error) {
-	patterns, err := readPnpmWorkspace(root)
-	if err != nil {
-		patterns, err = readPackageJSONWorkspaces(root)
+	var patterns []string
+	var err error
+	if cfg != nil && len(cfg.Workspace.Discovery) > 0 {
+		patterns = cfg.Workspace.Discovery
+	} else {
+		patterns, err = readPnpmWorkspace(root)
 		if err != nil {
-			return nil, err
+			patterns, err = readPackageJSONWorkspaces(root)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 

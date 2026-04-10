@@ -38,7 +38,7 @@ Use --package to check a single package.`,
 			}
 		}
 
-		registry := checks.Default()
+		registry := checks.Build(cfg, ws.Root, "check")
 		results := checks.RunAll(ws, cfg, registry, checkOnly)
 
 		if jsonMode {
@@ -58,10 +58,13 @@ func init() {
 // ─── JSON output ─────────────────────────────────────────────────────────────
 
 type checkJSONResult struct {
-	OK       bool                         `json:"ok"`
-	Packages map[string]packageJSONResult `json:"packages"`
-	Summary  checkSummary                 `json:"summary"`
-	Hint     string                       `json:"hint,omitempty"`
+	OK           bool                         `json:"ok"`
+	Packages     map[string]packageJSONResult `json:"packages"`
+	Results      []checkJSONPackage           `json:"results"`
+	Groups       map[string]int               `json:"groups,omitempty"`
+	Capabilities map[string]int               `json:"capabilities,omitempty"`
+	Summary      checkSummary                 `json:"summary"`
+	Hint         string                       `json:"hint,omitempty"`
 }
 
 type packageJSONResult struct {
@@ -69,18 +72,26 @@ type packageJSONResult struct {
 	Issues []checks.Issue `json:"issues"`
 }
 
+type checkJSONPackage struct {
+	Package string         `json:"package"`
+	OK      bool           `json:"ok"`
+	Issues  []checks.Issue `json:"issues"`
+}
+
 type checkSummary struct {
-	Total   int `json:"total"`
-	Passed  int `json:"passed"`
-	Failed  int `json:"failed"`
-	Errors  int `json:"errors"`
+	Total    int `json:"total"`
+	Passed   int `json:"passed"`
+	Failed   int `json:"failed"`
+	Errors   int `json:"errors"`
 	Warnings int `json:"warnings"`
 }
 
 func outputCheckJSON(results map[string]checks.PackageResult, cfg *config.DevkitConfig) error {
 	out := checkJSONResult{
-		OK:       true,
-		Packages: make(map[string]packageJSONResult, len(results)),
+		OK:           true,
+		Packages:     make(map[string]packageJSONResult, len(results)),
+		Groups:       map[string]int{},
+		Capabilities: map[string]int{},
 	}
 
 	for name, r := range results {
@@ -102,6 +113,19 @@ func outputCheckJSON(results map[string]checks.PackageResult, cfg *config.Devkit
 			OK:     ok,
 			Issues: r.Issues,
 		}
+		out.Results = append(out.Results, checkJSONPackage{
+			Package: name,
+			OK:      ok,
+			Issues:  r.Issues,
+		})
+		out.Groups[r.Package.Category]++
+		for _, issue := range r.Issues {
+			cap := string(issue.Capability)
+			if cap == "" {
+				cap = string(checks.CapabilityManual)
+			}
+			out.Capabilities[cap]++
+		}
 
 		out.Summary.Total++
 		if ok {
@@ -116,7 +140,10 @@ func outputCheckJSON(results map[string]checks.PackageResult, cfg *config.Devkit
 	}
 
 	_ = JSONOut(out)
-	return errSilent
+	if !out.OK {
+		return errSilent
+	}
+	return nil
 }
 
 // ─── Human output ─────────────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ var errSilent = errors.New("")
 
 // Global flags accessible to all subcommands.
 var (
-	jsonMode  bool
+	jsonMode   bool
 	configPath string
 	depthFlag  int // 0 = use devkit.yaml value or default
 )
@@ -34,13 +34,13 @@ var rootCmd = &cobra.Command{
 	Short: "Workspace quality manager for Node.js and Go monorepos",
 	Long: `kb-devkit is a workspace orchestrator for Node.js and Go monorepos.
 Content-addressable task caching, affected-package detection, and quality
-checks — declaratively configured via devkit.yaml.
+checks — declaratively configured via devkit.yaml and reusable YAML packs.
 
 Commands:
   run      <task> [task2 ...] [--affected] [--no-cache] [--json]
   init     create a starter devkit.yaml
   check    [--package X] [--json]
-  fix      [--package X] [--dry-run] [--json]
+  fix      [--package X] [--dry-run] [--safe|--scaffold|--sync|--all] [--json]
   stats    workspace health score
   status   [--json]
   watch    [--json]
@@ -49,10 +49,11 @@ Commands:
   doctor   [--json]
 
 Examples:
-  kb-devkit init                              create devkit.yaml
+  kb-devkit init                              create a minimal devkit.yaml
   kb-devkit run build                         build all packages (cached)
   kb-devkit run build lint test --affected    only changed packages
   kb-devkit check --json                      machine-readable check results
+  kb-devkit fix --scaffold --json             create missing deterministic files
   kb-devkit stats                             workspace health score`,
 	SilenceUsage:  true,
 	SilenceErrors: true,

@@ -33,7 +33,7 @@ Exits with code 1 if any errors are found, blocking the commit.`,
 				newOutput().OK("No staged files — gate passed")
 			} else {
 				_ = JSONOut(map[string]any{"ok": true, "packages": []any{}})
-				return errSilent
+				return nil
 			}
 			return nil
 		}
@@ -63,7 +63,7 @@ Exits with code 1 if any errors are found, blocking the commit.`,
 		wsFiltered := *ws
 		wsFiltered.Packages = filteredPkgs
 
-		registry := checks.Default()
+		registry := checks.Build(cfg, ws.Root, "gate")
 		results := checks.RunAll(&wsFiltered, cfg, registry, nil)
 
 		// Count errors.
@@ -85,7 +85,7 @@ Exits with code 1 if any errors are found, blocking the commit.`,
 			if errorCount > 0 {
 				return errSilent
 			}
-			return errSilent
+			return nil
 		}
 
 		o := newOutput()

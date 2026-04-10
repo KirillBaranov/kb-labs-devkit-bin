@@ -2,6 +2,8 @@
 
 Go binary for workspace orchestration: quality checks, config sync, and task execution with content-addressable caching.
 
+`kb-devkit` is config-first. The binary owns schema, merge semantics, execution, checks, fixes, and sync. Policy lives in `devkit.yaml` and reusable YAML packs loaded via `extends`.
+
 ## Build
 
 ```bash
@@ -31,11 +33,35 @@ kb-devkit run build lint test --affected
 ### `init` — create devkit.yaml
 
 ```bash
-kb-devkit init           # creates devkit.yaml with all sections commented as examples
+kb-devkit init           # creates a minimal starter config
 kb-devkit init --force   # overwrite existing
 ```
 
-Generates a fully commented `devkit.yaml`. Uncomment the tasks you need and adjust.
+Generates a short `devkit.yaml` that you can extend with packs, tasks, checks, and sync targets.
+
+### Packs and `extends`
+
+`devkit.yaml` can compose built-in, local, and package-provided packs:
+
+```yaml
+schemaVersion: 2
+extends:
+  - builtin:generic
+  - ./devkit/packs/frontend.yaml
+  - package:@acme/devkit-pack#devkit.pack.yaml
+```
+
+Supported references:
+- `builtin:<name>`: embedded pack shipped with the binary
+- relative or absolute file path: local YAML pack
+- `package:<pkg>#<path>`: pack loaded from `node_modules/<pkg>/<path>`
+
+Packs can contribute:
+- `presets`
+- `tasks`
+- `sync`
+- `checks.packages`
+- `custom_checks`
 
 ---
 
@@ -48,7 +74,7 @@ Tasks are defined in `devkit.yaml`. Each task can have multiple **variants** —
 kb-devkit run build
 kb-devkit run build lint
 kb-devkit run build lint test --affected
-kb-devkit run build --packages @kb-labs/core-types,@kb-labs/core-runtime
+kb-devkit run build --packages @acme/core-types,@acme/core-runtime
 kb-devkit run build --no-cache
 kb-devkit run build --live          # stream stdout/stderr in real time
 kb-devkit run build --json
@@ -92,19 +118,36 @@ After finding directly changed packages, BFS expands through the reverse depende
 
 ```bash
 kb-devkit check                           # check all packages
-kb-devkit check --package @kb-labs/core  # check single package
+kb-devkit check --package @acme/core     # check single package
 kb-devkit check --json
 ```
 
 Validates each package against the rules declared in its matched preset: naming, tsconfig, eslint, required scripts, deps, files.
+
+`check --json` returns:
+- `summary`
+- `groups`
+- `capabilities`
+- `results`
+
+External command-based checks declared in `custom_checks` are included in the same pipeline.
 
 ### `fix` — auto-fix violations
 
 ```bash
 kb-devkit fix
 kb-devkit fix --dry-run
-kb-devkit fix --package @kb-labs/core
+kb-devkit fix --safe
+kb-devkit fix --scaffold
+kb-devkit fix --all
+kb-devkit fix --package @acme/core
 ```
+
+Fix modes:
+- `--safe`: deterministic in-place fixes
+- `--scaffold`: create missing deterministic files
+- `--sync`: apply issues marked as sync-managed
+- `--all`: all supported fix capabilities
 
 ### `stats` — workspace health
 
@@ -150,6 +193,21 @@ kb-devkit doctor --json
 
 ## Configuration (`devkit.yaml`)
 
+Minimal starter config:
+
+```yaml
+schemaVersion: 2
+extends: [builtin:generic]
+
+workspace:
+  discovery:
+    - "packages/**"
+  categories:
+    libs:
+      match: ["packages/**"]
+      preset: node-lib
+```
+
 ### Categories
 
 Categories classify packages and control which task variant runs for them. They are declared as an **ordered list** — the first matching category wins.
@@ -160,7 +218,7 @@ workspace:
     # More specific entries first — literal paths match before globs.
     spa:
       match:
-        - "platform/kb-labs-studio/apps/studio"   # literal path, no wildcards
+        - "apps/studio"   # literal path, no wildcards
       preset: node-app
 
     ts-app:
@@ -175,7 +233,7 @@ workspace:
 
     go-binary:
       match:
-        - "infra/kb-labs-devkit-bin"   # literal path — Go package without package.json
+        - "tools/devkit"   # literal path — Go package without package.json
       preset: go-binary
 ```
 
@@ -252,6 +310,51 @@ tasks:
       inputs: ["dist/**"]
       cache: false                   # always runs, never cached
 ```
+
+### External command checks and fixers
+
+You can extend `kb-devkit` without Go plugins by declaring command-based checks in YAML packs or directly in `devkit.yaml`.
+
+```yaml
+checks:
+  packages:
+    external-readme:
+      enabled: true
+      config:
+        requiredFile: README.md
+
+custom_checks:
+  - name: external-readme
+    run: "./node_modules/@acme/devkit-pack/bin/external-readme.sh"
+    fix: "./node_modules/@acme/devkit-pack/bin/external-readme.sh"
+    on: ["check"]
+    language: typescript
+```
+
+Runtime contract:
+- command runs from workspace root
+- stdin receives JSON with `package`, `preset`, `workspaceRoot`, `check`, `phase`, `config`
+- fix commands also receive `issues` and `dryRun`
+- env includes `KB_DEVKIT_MODE`, `KB_DEVKIT_PACKAGE_*`, `KB_DEVKIT_WORKSPACE_ROOT`
+
+Expected JSON output:
+
+```json
+{
+  "issues": [
+    {
+      "check": "external-readme",
+      "severity": "error",
+      "message": "README missing",
+      "file": "/repo/packages/demo/README.md",
+      "fix": "create README.md",
+      "capability": "scaffoldable"
+    }
+  ]
+}
+```
+
+For fix commands, returning `{"actions":["..."]}` is allowed but optional.
 
 **Single variant (shorthand)** — if a task applies to all packages and needs no category filter, write it as a plain object:
 

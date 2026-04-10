@@ -34,7 +34,10 @@ var depsCmd = &cobra.Command{
 					"ok":      len(result) == 0,
 					"circles": result,
 				})
-				return errSilent
+				if len(result) > 0 {
+					return errSilent
+				}
+				return nil
 			}
 
 			o := newOutput()

@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	syncCheck  bool
-	syncDryRun bool
-	syncSource string
+	syncCheck   bool
+	syncDryRun  bool
+	syncSource  string
+	syncVerbose bool
 )
 
 var syncCmd = &cobra.Command{
@@ -48,14 +49,22 @@ Use --dry-run to preview changes without writing.`,
 		}
 
 		if jsonMode {
+			ok := len(result.Drifted) == 0 || !syncCheck
+			summary, groups := summarizeSync(result)
 			_ = JSONOut(map[string]any{
-				"ok":      len(result.Drifted) == 0 || !syncCheck,
+				"ok":      ok,
+				"summary": summary,
+				"groups":  groups,
+				"details": result.Entries,
 				"created": result.Created,
 				"updated": result.Updated,
 				"skipped": result.Skipped,
 				"drifted": result.Drifted,
 			})
-			return errSilent
+			if !ok {
+				return errSilent
+			}
+			return nil
 		}
 
 		o := newOutput()
@@ -64,9 +73,15 @@ Use --dry-run to preview changes without writing.`,
 			if len(result.Drifted) == 0 {
 				o.OK("No drift detected — all files match source")
 			} else {
-				o.Warn(fmt.Sprintf("%d file(s) drifted from source:", len(result.Drifted)))
-				for _, f := range result.Drifted {
-					fmt.Printf("  %s %s\n", o.warning.Render("~"), f)
+				o.Warn(fmt.Sprintf("%d file(s) drifted from source", len(result.Drifted)))
+				_, groups := summarizeSync(result)
+				for _, g := range groups {
+					fmt.Printf("  %s %-36s repos=%d files=%d\n", o.warning.Render("~"), g["target"], g["repos"], g["files"])
+				}
+				if syncVerbose || cfg.Reporting.Verbose {
+					for _, f := range result.Drifted {
+						fmt.Printf("    %s %s\n", o.dim.Render("•"), f)
+					}
 				}
 			}
 			return nil
@@ -77,13 +92,19 @@ Use --dry-run to preview changes without writing.`,
 		}
 
 		for _, f := range result.Created {
-			fmt.Printf("  %s %s\n", o.healthy.Render("+"), f)
+			if syncVerbose || cfg.Reporting.Verbose {
+				fmt.Printf("  %s %s\n", o.healthy.Render("+"), f)
+			}
 		}
 		for _, f := range result.Updated {
-			fmt.Printf("  %s %s\n", o.info.Render("~"), f)
+			if syncVerbose || cfg.Reporting.Verbose {
+				fmt.Printf("  %s %s\n", o.info.Render("~"), f)
+			}
 		}
 		for _, f := range result.Skipped {
-			fmt.Printf("  %s %s\n", o.dim.Render("-"), f)
+			if syncVerbose || cfg.Reporting.Verbose {
+				fmt.Printf("  %s %s\n", o.dim.Render("-"), f)
+			}
 		}
 
 		if !syncDryRun {
@@ -99,5 +120,42 @@ func init() {
 	syncCmd.Flags().BoolVar(&syncCheck, "check", false, "report drift only, do not write")
 	syncCmd.Flags().BoolVar(&syncDryRun, "dry-run", false, "preview changes without writing")
 	syncCmd.Flags().StringVar(&syncSource, "source", "", "limit sync to a specific source key")
+	syncCmd.Flags().BoolVar(&syncVerbose, "verbose", false, "show full file list instead of grouped summary")
 	rootCmd.AddCommand(syncCmd)
+}
+
+func summarizeSync(result devsync.SyncResult) (map[string]int, []map[string]any) {
+	summary := map[string]int{
+		"created": len(result.Created),
+		"updated": len(result.Updated),
+		"skipped": len(result.Skipped),
+		"drifted": len(result.Drifted),
+	}
+	type bucket struct {
+		target string
+		repos  map[string]bool
+		files  int
+	}
+	buckets := map[string]*bucket{}
+	for _, entry := range result.Entries {
+		if entry.Status != "drifted" {
+			continue
+		}
+		b := buckets[entry.Target]
+		if b == nil {
+			b = &bucket{target: entry.Target, repos: map[string]bool{}}
+			buckets[entry.Target] = b
+		}
+		b.files++
+		b.repos[entry.DestRoot] = true
+	}
+	var groups []map[string]any
+	for _, b := range buckets {
+		groups = append(groups, map[string]any{
+			"target": b.target,
+			"repos":  len(b.repos),
+			"files":  b.files,
+		})
+	}
+	return summary, groups
 }
